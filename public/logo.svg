@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="ember" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316"/>
+      <stop offset="50%" stop-color="#ef4444"/>
+      <stop offset="100%" stop-color="#c026d3"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb923c" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.3"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="240" fill="#0c0e14"/>
+  <circle cx="256" cy="256" r="240" fill="url(#glow)" opacity="0.15"/>
+  <!-- Outer ring -->
+  <circle cx="256" cy="256" r="220" fill="none" stroke="url(#ember)" stroke-width="3" opacity="0.5"/>
+  <!-- Paintbrush stroke — abstract R shape -->
+  <path d="M180 360 C180 360 185 200 220 160 C255 120 310 130 320 170 C330 210 280 230 250 240 C220 250 290 260 310 300 C330 340 340 380 340 380" 
+        stroke="url(#ember)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Paint splatter dots -->
+  <circle cx="170" cy="370" r="8" fill="#f97316" opacity="0.8"/>
+  <circle cx="350" cy="390" r="6" fill="#c026d3" opacity="0.7"/>
+  <circle cx="200" cy="140" r="5" fill="#ef4444" opacity="0.6"/>
+  <!-- Sparkle -->
+  <path d="M380 130 L385 145 L400 150 L385 155 L380 170 L375 155 L360 150 L375 145 Z" fill="#f97316" opacity="0.9"/>
+</svg>

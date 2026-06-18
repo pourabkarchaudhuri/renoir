@@ -1,0 +1,145 @@
+import { app, shell } from 'electron';
+import path from 'node:path';
+import fs from 'node:fs';
+
+// --- Interfaces ---
+
+export interface MigrationResult {
+  migrated: boolean;
+  from?: string;
+  to?: string;
+  error?: string;
+}
+
+interface MigrationMarker {
+  migratedAt: string;       // ISO timestamp
+  movedTo: string;          // absolute path to new location
+  version: string;          // app version that performed migration
+}
+
+export interface WriteArtifactReq {
+  projectId: string;
+  filename: string;
+  content: string;
+  encoding?: 'utf8' | 'base64';
+}
+
+// --- Path Resolution ---
+
+export function workspaceRoot(): string {
+  try {
+    return path.join(app.getPath('documents'), 'Renoir');
+  } catch {
+    return path.join(app.getPath('userData'), 'workspace');
+  }
+}
+
+export function projectDir(projectId: string): string {
+  return path.join(workspaceRoot(), 'projects', projectId);
+}
+
+export function ensureProjectDir(projectId: string): string {
+  const d = projectDir(projectId);
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+
+// --- Workspace Operations ---
+
+export async function openWorkspaceFolder(): Promise<{ ok: boolean; path: string }> {
+  const root = workspaceRoot();
+  fs.mkdirSync(root, { recursive: true });
+  await shell.openPath(root);
+  return { ok: true, path: root };
+}
+
+export function writeArtifact(req: WriteArtifactReq): { ok: boolean; path?: string; error?: string } {
+  try {
+    const dir = ensureProjectDir(req.projectId);
+    const safe = req.filename.replace(/[^a-z0-9._-]/gi, '_');
+    const target = path.join(dir, safe);
+    if (req.encoding === 'base64') {
+      fs.writeFileSync(target, Buffer.from(req.content, 'base64'));
+    } else {
+      fs.writeFileSync(target, req.content, 'utf8');
+    }
+    return { ok: true, path: target };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+// --- Migration ---
+
+/**
+ * Recursively copies all files/directories from src to dest.
+ * Skips `.migrated.json` and does not overwrite existing files (no-clobber).
+ */
+function copyRecursive(src: string, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+
+  const entries = fs.readdirSync(src, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === '.migrated.json') continue;
+
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+
+    if (entry.isDirectory()) {
+      copyRecursive(srcPath, destPath);
+    } else if (entry.isFile()) {
+      if (!fs.existsSync(destPath)) {
+        fs.copyFileSync(srcPath, destPath);
+      }
+    }
+  }
+}
+
+/**
+ * One-time migration from old userData/workspace to documents/Renoir.
+ * Safe, idempotent, and non-destructive (old data is never deleted).
+ */
+export function migrateWorkspace(): MigrationResult {
+  const oldRoot = path.join(app.getPath('userData'), 'workspace');
+  const newRoot = workspaceRoot();
+  const markerPath = path.join(oldRoot, '.migrated.json');
+
+  // Guard: already migrated
+  if (fs.existsSync(markerPath)) {
+    return { migrated: false };
+  }
+
+  // Guard: nothing to migrate
+  if (!fs.existsSync(oldRoot)) {
+    fs.mkdirSync(newRoot, { recursive: true });
+    return { migrated: false };
+  }
+
+  // Guard: new location already has content (manual move or partial migration)
+  if (fs.existsSync(newRoot)) {
+    const contents = fs.readdirSync(newRoot);
+    if (contents.length > 0) {
+      writeMarker(markerPath, newRoot);
+      return { migrated: false };
+    }
+  }
+
+  // Perform copy (not move — safer, old data preserved as backup)
+  try {
+    copyRecursive(oldRoot, newRoot);
+    writeMarker(markerPath, newRoot);
+    return { migrated: true, from: oldRoot, to: newRoot };
+  } catch (err: any) {
+    return { migrated: false, error: err?.message || String(err) };
+  }
+}
+
+function writeMarker(markerPath: string, newRoot: string): void {
+  const marker: MigrationMarker = {
+    migratedAt: new Date().toISOString(),
+    movedTo: newRoot,
+    version: app.getVersion(),
+  };
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2));
+}
