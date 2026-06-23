@@ -4,7 +4,7 @@ import { ChatPane } from '@/components/studio/ChatPane';
 import { PreviewPane } from '@/components/studio/PreviewPane';
 import { LeftRail } from '@/components/studio/LeftRail';
 import { Splitter } from '@/components/studio/Splitter';
-import { extractArtifact, extractQuestionForm, composeSystemPrompt } from '@/lib/prompt';
+import { extractArtifact, extractQuestionForm, composeSystemPrompt, inferPhase } from '@/lib/prompt';
 import { processArtifactImages } from '@/lib/image-pipeline';
 import {
   shouldAutoContinue,
@@ -35,9 +35,16 @@ export function Studio() {
   const pendingAssistant = useStudio((s) => s.pendingAssistant);
 
   const conversationIdRef = useRef<string | null>(null);
+  const autoContinueRef = useRef<AutoContinueState>(createInitialAutoState());
   const [autoContinue, setAutoContinue] = useState<AutoContinueState>(createInitialAutoState);
+  const syncAutoContinue = (next: AutoContinueState) => {
+    autoContinueRef.current = next;
+    setAutoContinue(next);
+  };
   // Track the buffer snapshot before a continuation so we can detect overlap
   const bufferBeforeContinueRef = useRef<string>('');
+  const autoContinueKickRef = useRef(false);
+  const streamStartedAtRef = useRef(Date.now());
   // Image generation progress state
   const [imageGenProgress, setImageGenProgress] = useState<{ done: number; total: number } | null>(null);
 
@@ -58,26 +65,23 @@ export function Studio() {
         }
       } else if (e.type === 'done') {
         const currentPending = useStudio.getState().pendingAssistant;
-        const currentState = autoContinue;
+        const currentState = autoContinueRef.current;
 
         if (shouldAutoContinue(e.finishReason, currentPending, currentState)) {
-          // Auto-continue: increment attempts, keep buffer accumulating
           const nextState: AutoContinueState = {
             ...currentState,
             attempts: currentState.attempts + 1,
             isAutoContinuing: true,
           };
-          setAutoContinue(nextState);
-          // Snapshot the buffer before continuation for overlap detection
+          syncAutoContinue(nextState);
           bufferBeforeContinueRef.current = currentPending;
-          // Send continuation message without calling finishStreaming
           void sendUserMessage(
             DEFAULT_AUTO_CONTINUE_CONFIG.continuePrompt,
-            { skipAppend: false },
+            { silentContinue: true },
           );
         } else {
-          // Normal completion or max retries reached
-          setAutoContinue((s) => ({ ...s, isAutoContinuing: false }));
+          syncAutoContinue({ ...currentState, isAutoContinuing: false });
+          autoContinueKickRef.current = false;
           void finishStream().then(() => {
             // After finishStreaming commits the message, trigger image pipeline
             // if the artifact is complete (tasks 8.1, 8.5)
@@ -95,12 +99,13 @@ export function Studio() {
       else if (e.type === 'retry')   useStudio.getState().markRetry(e.attempt, e.waitMs, e.reason);
       else if (e.type === 'error') {
         toast(e.message, 'err');
-        setAutoContinue((s) => ({ ...s, isAutoContinuing: false }));
+        syncAutoContinue({ ...autoContinueRef.current, isAutoContinuing: false });
+        autoContinueKickRef.current = false;
         void finishStream();
       }
     });
     return off;
-  }, [appendDelta, finishStream, toast, autoContinue]);
+  }, [appendDelta, finishStream, toast]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -159,16 +164,19 @@ export function Studio() {
     }
   };
 
-  const sendUserMessage = async (content: string, opts?: { skipAppend?: boolean; attachments?: any[] }) => {
+  const sendUserMessage = async (
+    content: string,
+    opts?: { skipAppend?: boolean; attachments?: any[]; silentContinue?: boolean },
+  ) => {
     if (!project || (!content.trim() && !opts?.attachments?.length)) return;
     const id = project.id + ':' + Date.now();
     conversationIdRef.current = id;
 
-    // Reset auto-continue state for a fresh user-initiated message
-    // (but not when auto-continue itself is sending the continuation prompt)
-    if (!autoContinue.isAutoContinuing) {
-      setAutoContinue(createInitialAutoState());
+    const continuing = opts?.silentContinue || autoContinueRef.current.isAutoContinuing;
+    if (!continuing) {
+      syncAutoContinue(createInitialAutoState());
       bufferBeforeContinueRef.current = '';
+      streamStartedAtRef.current = Date.now();
     }
 
     const composed = composeSystemPrompt({
@@ -179,15 +187,26 @@ export function Studio() {
       answers,
     });
 
-    if (!opts?.skipAppend) await useStudio.getState().appendUser(content, opts?.attachments);
+    if (!opts?.skipAppend && !opts?.silentContinue) {
+      await useStudio.getState().appendUser(content, opts?.attachments);
+    }
     const next = useStudio.getState().project;
     if (!next) return;
 
     startStreaming();
 
+    const convMessages = next.conversation.map((m) => ({
+      role: m.role as 'system' | 'user' | 'assistant',
+      content: m.content,
+      attachments: m.attachments,
+    }));
+
     if (selectedAgentId && selectedAgentId !== 'byok') {
-      // Route through CLI agent — single-shot prompt with the system context inline.
-      const flat = [composed.system, ...next.conversation.map((m) => `${m.role.toUpperCase()}: ${m.content}`)].join('\n\n');
+      const flat = [
+        composed.system,
+        ...convMessages.map((m) => `${m.role.toUpperCase()}: ${m.content}`),
+        ...(opts?.silentContinue ? [`USER: ${content}`] : []),
+      ].join('\n\n');
       const res = await window.renoir.invokeAgent({ agentId: selectedAgentId, conversationId: id, prompt: flat });
       if (!res.ok) {
         toast(res.error || 'Could not invoke agent', 'err');
@@ -198,12 +217,11 @@ export function Studio() {
 
     const messages: { role: 'system' | 'user' | 'assistant'; content: string; attachments?: any[] }[] = [
       { role: 'system', content: composed.system },
-      ...next.conversation.map((m) => ({
-        role: m.role as any,
-        content: m.content,
-        attachments: m.attachments,
-      })),
+      ...convMessages,
     ];
+    if (opts?.silentContinue) {
+      messages.push({ role: 'user', content });
+    }
     const res = await window.renoir.chatStart({ conversationId: id, messages });
     if (!res.ok) {
       toast(res.error || 'Could not start chat', 'err');
@@ -234,74 +252,85 @@ export function Studio() {
 
   const lastAssistant = project?.conversation.findLast((m) => m.role === 'assistant');
   const liveExtracted = isStreaming ? extractArtifact(pendingAssistant) : null;
-  // If the user restored a historical version, render it instead of the latest.
   const activeVersion = project?.activeVersionId
     ? project.versions?.find((v) => v.id === project.activeVersionId)
     : null;
-  // Persist the preview between turns: while streaming a new turn that
-  // has not produced an <artifact> yet, fall back to the last completed one.
+
+  // Only render *complete* artifacts in the preview — partial HTML flashes
+  // white/black and shows raw markup while the model is still streaming.
+  const completeArtifactHtml = useMemo(() => {
+    if (activeVersion?.html) return activeVersion.html;
+    if (liveExtracted?.complete) return liveExtracted.html;
+    if (!isStreaming && lastAssistant) {
+      const finished = extractArtifact(lastAssistant.content);
+      if (finished?.complete) return finished.html;
+    }
+    return null;
+  }, [activeVersion, liveExtracted, isStreaming, lastAssistant]);
+
   const fallbackExtracted = activeVersion
     ? { html: activeVersion.html, complete: true }
     : (lastAssistant ? extractArtifact(lastAssistant.content) : null);
-  const extracted = liveExtracted || fallbackExtracted;
-  const artifactHtml = extracted?.html || null;
   const liveText = isStreaming ? pendingAssistant : (lastAssistant?.content || '');
-  const questionForm = !liveExtracted && !fallbackExtracted ? extractQuestionForm(liveText) : null;
+  const questionForm = !liveExtracted && !fallbackExtracted?.complete ? extractQuestionForm(liveText) : null;
 
-  // If the last finished assistant message has an *unclosed* artifact, we
-  // suspect a truncation. Surface a Continue affordance so the user can
-  // resume without retyping context.
-  const truncated = !isStreaming && lastAssistant && extracted && !extracted.complete;
-  const continueLast = async () => {
-    if (!project) return;
-    void sendUserMessage('Continue from where you stopped. Finish the artifact in full.', { skipAppend: false });
-  };
+  const truncated = Boolean(!isStreaming && lastAssistant && fallbackExtracted && !fallbackExtracted.complete);
 
-  // Cancel auto-continuation: stop the stream and revert to manual mode
-  const cancelAutoContinue = async () => {
-    setAutoContinue((s) => ({ ...s, isAutoContinuing: false, enabled: false }));
-    await cancel();
-  };
+  // Safety net: if a turn ended with an open artifact, resume automatically.
+  useEffect(() => {
+    if (!project || isStreaming || autoContinueRef.current.isAutoContinuing) return;
+    if (!truncated) { autoContinueKickRef.current = false; return; }
+    if (autoContinueRef.current.attempts >= autoContinueRef.current.maxAttempts) return;
+    if (autoContinueKickRef.current) return;
+    autoContinueKickRef.current = true;
+    const nextState: AutoContinueState = {
+      ...autoContinueRef.current,
+      attempts: autoContinueRef.current.attempts + 1,
+      isAutoContinuing: true,
+    };
+    syncAutoContinue(nextState);
+    bufferBeforeContinueRef.current = lastAssistant?.content || '';
+    void sendUserMessage(DEFAULT_AUTO_CONTINUE_CONFIG.continuePrompt, { silentContinue: true });
+  }, [truncated, isStreaming, project, lastAssistant?.content]);
 
-  // Whether auto-continue exhausted its attempts without completing
   const autoContinueExhausted = !autoContinue.isAutoContinuing
     && autoContinue.attempts >= autoContinue.maxAttempts
     && truncated;
+
+  const generationPhase = inferPhase(
+    isStreaming ? pendingAssistant : (lastAssistant?.content || ''),
+    Date.now() - streamStartedAtRef.current,
+  );
+  const isGenerating = isStreaming || autoContinue.isAutoContinuing || (truncated && !autoContinueExhausted);
+  const showPreviewLoading = Boolean(isGenerating && !completeArtifactHtml);
+
+  const continueLast = async () => {
+    if (!project) return;
+    void sendUserMessage('Continue from where you stopped. Finish the artifact in full.', { silentContinue: true });
+  };
+
+  const cancelAutoContinue = async () => {
+    syncAutoContinue({ ...autoContinueRef.current, isAutoContinuing: false, enabled: false });
+    autoContinueKickRef.current = false;
+    await cancel();
+  };
 
   if (!project) return <EmptyState />;
 
   return (
     <div className="flex h-full flex-col">
-      {truncated && (
+      {autoContinueExhausted && (
         <div className="px-4 py-2 bg-amber-500/15 border-b border-amber-500/40 text-[12px] text-amber-800 dark:text-amber-200 flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-          {autoContinue.isAutoContinuing ? (
-            <>
-              Auto-continuing… (attempt {autoContinue.attempts}/{autoContinue.maxAttempts})
-              <button onClick={cancelAutoContinue} className="ml-auto btn-quiet">
-                Stop
-              </button>
-            </>
-          ) : autoContinueExhausted ? (
-            <>
-              Auto-continue exhausted — artifact may need manual completion.
-              <button onClick={continueLast} className="ml-auto btn-quiet">
-                Continue manually
-              </button>
-            </>
-          ) : (
-            <>
-              Generation paused — click to resume.
-              <button onClick={continueLast} className="ml-auto btn-quiet">
-                Continue
-              </button>
-            </>
-          )}
+          Generation stopped before the artifact finished.
+          <button onClick={continueLast} className="ml-auto btn-quiet">
+            Try again
+          </button>
         </div>
       )}
       <StudioLayout
         chat={<ChatPane onSend={(content, attachments) => sendUserMessage(content, { attachments })} onCancel={cancel} onRegenerate={regenerateFrom} questionForm={questionForm} autoContinue={autoContinue} onCancelAutoContinue={cancelAutoContinue} />}
-        preview={<PreviewPane artifact={artifactHtml} streaming={isStreaming && !!liveExtracted && !liveExtracted.complete} imageGenProgress={imageGenProgress} />}
+        preview={<PreviewPane artifact={completeArtifactHtml} loading={showPreviewLoading} loadingPhase={generationPhase} imageGenProgress={imageGenProgress} />}
       />
     </div>
   );

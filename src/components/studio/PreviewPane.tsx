@@ -11,6 +11,7 @@ import { DiffDialog } from './DiffDialog';
 import { cn } from '@/lib/cn';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LintBadge } from './LintBadge';
+import { PreviewLoading } from './PreviewLoading';
 import { defaultModeForSkill, wrapWithBridge, type PreviewMode } from '@/lib/preview-modes';
 
 type Surface = 'phone' | 'tablet' | 'desktop';
@@ -21,7 +22,17 @@ const SURFACE_SIZES: Record<Surface, { w: number; h: number; label: string }> = 
   desktop: { w: 1280, h: 800,  label: 'Desktop' },
 };
 
-export function PreviewPane({ artifact, streaming = false, imageGenProgress = null }: { artifact: string | null; streaming?: boolean; imageGenProgress?: { done: number; total: number } | null }) {
+export function PreviewPane({
+  artifact,
+  loading = false,
+  loadingPhase = 'Composing your artifact…',
+  imageGenProgress = null,
+}: {
+  artifact: string | null;
+  loading?: boolean;
+  loadingPhase?: string;
+  imageGenProgress?: { done: number; total: number } | null;
+}) {
   const [surface, setSurface] = useState<Surface>('desktop');
   const [showCode, setShowCode] = useState(false);
   const project = useStudio((s) => s.project);
@@ -201,7 +212,7 @@ export function PreviewPane({ artifact, streaming = false, imageGenProgress = nu
     <section className="flex-1 min-w-0 flex flex-col bg-canvas/50">
       <VersionStrip onCompare={(a, b) => setDiff({ a, b })} />
       <div className="px-3 py-2 border-b border-border flex items-center gap-1.5">
-        {streaming && (
+        {loading && (
           <span className="flex items-center gap-1.5 px-1.5 h-6 rounded text-[10px] uppercase tracking-[0.18em] text-primary bg-primary/10 ring-1 ring-primary/30">
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
             live
@@ -249,7 +260,9 @@ export function PreviewPane({ artifact, streaming = false, imageGenProgress = nu
 
       <div className="flex-1 relative overflow-auto p-6 grain flex items-start justify-center">
         <AnimatePresence mode="wait">
-          {!srcDoc ? (
+          {loading && !srcDoc ? (
+            <PreviewLoading key="loading" phase={loadingPhase} />
+          ) : !srcDoc ? (
             <PreviewEmpty key="empty" />
           ) : showCode ? (
             <motion.pre

@@ -8,6 +8,7 @@ import { extractArtifact, stripArtifact, inferPhase } from '@/lib/prompt';
 import { renderMarkdown } from '@/lib/markdown';
 import { ChatMarkdown } from './ChatMarkdown';
 import type { AutoContinueState } from '@/lib/auto-continue';
+import { isAutoContinuePrompt } from '@/lib/auto-continue';
 import { readFileAsAttachment, readClipboardImage, classify, MAX_ATTACHMENTS, type Attachment, summarizeAttachments } from '@/lib/attachments';
 
 interface Props {
@@ -38,7 +39,9 @@ export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, autoCon
           <Greeting />
         )}
 
-        {project?.conversation.map((m, i) => (
+        {project?.conversation
+          .filter((m) => !(m.role === 'user' && isAutoContinuePrompt(m.content)))
+          .map((m, i) => (
           <EditableMessage
             key={i}
             index={i}
@@ -57,9 +60,7 @@ export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, autoCon
       {autoContinue?.isAutoContinuing && (
         <div className="px-8 py-2 flex items-center gap-2 text-[12px] text-primary/90 border-t border-border/50 bg-primary/5">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-          <span>
-            Auto-continuing… (attempt {autoContinue.attempts}/{autoContinue.maxAttempts})
-          </span>
+          <span>Finishing your artifact… (step {autoContinue.attempts}/{autoContinue.maxAttempts})</span>
           {onCancelAutoContinue && (
             <button
               onClick={onCancelAutoContinue}

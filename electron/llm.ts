@@ -75,6 +75,20 @@ function looksLikeResponsesEndpoint(endpoint: string): boolean {
   return /\/openai\/v1(\/responses)?\/?$/.test(u) || u.includes('/openai/v1/responses');
 }
 
+/** Reasoning / fixed-sampling models reject `temperature` and related params. */
+export function modelSupportsTemperature(model: string): boolean {
+  const m = (model || '').trim().toLowerCase();
+  if (!m) return true;
+  if (m === 'gpt-5' || m.startsWith('gpt-5-') || m.startsWith('gpt-5.')) return false;
+  if (/^o\d/.test(m)) return false;
+  return true;
+}
+
+function samplingParams(model: string, temperature?: number): { temperature?: number } {
+  if (!modelSupportsTemperature(model)) return {};
+  return { temperature: temperature ?? 0.7 };
+}
+
 type RouteKind = 'anthropic' | 'azure' | 'azure-responses' | 'openai';
 
 interface ResolvedRoute {
@@ -271,7 +285,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
       model: route.model,
       max_tokens: 16384,
       stream: true,
-      temperature: temperature ?? 0.7,
+      ...samplingParams(route.model, temperature),
       ...(sys ? { system: sys } : {}),
       messages: rest.map((m) => {
         const imgs = m.images;
@@ -302,7 +316,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     bodyJson = {
       model: route.model,
       stream: true,
-      temperature: temperature ?? 0.7,
+      ...samplingParams(route.model, temperature),
       ...(sys ? { instructions: sys } : {}),
       input: rest.map((m) => {
         const imgs = m.images;
@@ -347,7 +361,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
         }
         return { role: m.role, content: m.content };
       }),
-      temperature: temperature ?? 0.7,
+      ...samplingParams(route.model, temperature),
       stream: true,
     };
   } else {
@@ -373,7 +387,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
         }
         return { role: m.role, content: m.content };
       }),
-      temperature: temperature ?? 0.7,
+      ...samplingParams(route.model, temperature),
       stream: true,
     };
   }

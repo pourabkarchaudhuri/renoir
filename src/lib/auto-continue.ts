@@ -24,6 +24,11 @@ export const DEFAULT_AUTO_CONTINUE_CONFIG: AutoContinueConfig = {
   continuePrompt: 'Continue from where you stopped. Finish the artifact in full. Do not repeat what you already wrote.',
 };
 
+/** User-visible chat turns matching this are auto-continue pings (hide from history). */
+export function isAutoContinuePrompt(content: string): boolean {
+  return content.trimStart().startsWith('Continue from where you stopped');
+}
+
 /**
  * Creates a fresh AutoContinueState with sensible defaults.
  */

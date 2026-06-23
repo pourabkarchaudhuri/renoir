@@ -187,7 +187,7 @@ function Picker({
           <ChevronDown className={cn('h-3 w-3 ml-auto transition-transform', open && 'rotate-180')} />
         </div>
         <div className="text-[13px] font-medium tracking-tight mt-0.5 truncate">{value ?? '—'}</div>
-        {subtitle && <div className="text-[11px] text-muted-foreground truncate">{subtitle}</div>}
+        {subtitle && <div className="text-[11px] text-muted-foreground leading-snug break-words">{subtitle}</div>}
         {accent && <div className="mt-1.5">{accent}</div>}
       </button>
 
@@ -242,7 +242,7 @@ function Picker({
                     <div className="flex-1 min-w-0">
                       <div className="font-medium tracking-tight truncate">{o.name}</div>
                       {o.blurb && (
-                        <div className="text-[11px] text-muted-foreground truncate">{o.blurb}</div>
+                        <div className="text-[11px] text-muted-foreground leading-snug break-words">{o.blurb}</div>
                       )}
                     </div>
                     {active && <Check className="h-3.5 w-3.5 text-primary mt-1.5 shrink-0" />}
