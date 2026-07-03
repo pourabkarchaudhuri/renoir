@@ -4,8 +4,14 @@ import { ChatPane } from '@/components/studio/ChatPane';
 import { PreviewPane } from '@/components/studio/PreviewPane';
 import { LeftRail } from '@/components/studio/LeftRail';
 import { Splitter } from '@/components/studio/Splitter';
-import { extractArtifact, extractQuestionForm, composeSystemPrompt, inferPhase, usesDirectArtifactGeneration } from '@/lib/prompt';
+import { extractArtifact, extractQuestionForm, composeSystemPrompt, hasLockedBrief, extractBriefFromConversation } from '@/lib/prompt';
 import { processArtifactImages } from '@/lib/image-pipeline';
+import { extractPlaceholders } from '@/lib/image-placeholders';
+import { shouldRunImagePipeline, shouldPromptForImagePermission } from '@/lib/image-request';
+import { enrichProductDeckHtml } from '@/lib/product-deck-content';
+import { repairArtifactIfNeeded } from '@/lib/artifact-repair';
+import { applySession, getSkillSession, patchSkillSession } from '@/lib/skill-sessions';
+import { ConfirmDialog } from '@/components/chrome/ConfirmDialog';
 import {
   shouldAutoContinue,
   trimOverlap,
@@ -14,6 +20,7 @@ import {
   type AutoContinueState,
 } from '@/lib/auto-continue';
 import type { ChatStreamEvent } from '@/types/global';
+import { findSkillForConversation, previewHtmlForSkill } from '@/lib/skill-sessions';
 
 export function Studio() {
   const project = useStudio((s) => s.project);
@@ -35,38 +42,46 @@ export function Studio() {
   const pendingAssistant = useStudio((s) => s.pendingAssistant);
 
   const conversationIdRef = useRef<string | null>(null);
-  const autoContinueRef = useRef<AutoContinueState>(createInitialAutoState());
+  const bindConversation = useStudio((s) => s.bindConversation);
   const [autoContinue, setAutoContinue] = useState<AutoContinueState>(createInitialAutoState);
-  const syncAutoContinue = (next: AutoContinueState) => {
-    autoContinueRef.current = next;
-    setAutoContinue(next);
-  };
   // Track the buffer snapshot before a continuation so we can detect overlap
   const bufferBeforeContinueRef = useRef<string>('');
-  const autoContinueKickRef = useRef(false);
-  const questionFormKickRef = useRef(false);
-  const streamStartedAtRef = useRef(Date.now());
   // Image generation progress state
   const [imageGenProgress, setImageGenProgress] = useState<{ done: number; total: number } | null>(null);
+  const [imageGenPrompt, setImageGenPrompt] = useState<{
+    html: string;
+    projectId: string;
+    skillId: string;
+    slotCount: number;
+  } | null>(null);
 
   useEffect(() => {
     const off = window.renoir.onChatEvent((e: ChatStreamEvent) => {
-      if (!conversationIdRef.current || e.conversationId !== conversationIdRef.current) return;
+      const st = useStudio.getState();
+      const skillId = findSkillForConversation(st.project, e.conversationId)
+        ?? (st.activeConversationId === e.conversationId ? st.streamingSkillId : undefined);
+      if (!skillId) return;
+
+      const viewing = st.selectedSkillId === skillId;
+
       if (e.type === 'delta') {
-        const currentBuffer = useStudio.getState().pendingAssistant;
+        if (!viewing) {
+          appendDelta(e.text);
+          return;
+        }
+        const currentBuffer = st.pendingAssistant;
         const bufferBefore = bufferBeforeContinueRef.current;
-        // If we're auto-continuing and this is the first delta of a new continuation,
-        // apply overlap trimming
         if (bufferBefore && currentBuffer === bufferBefore) {
-          const trimmed = trimOverlap(bufferBefore, e.text);
-          appendDelta(trimmed);
+          appendDelta(trimOverlap(bufferBefore, e.text));
           bufferBeforeContinueRef.current = '';
         } else {
           appendDelta(e.text);
         }
       } else if (e.type === 'done') {
-        const currentPending = useStudio.getState().pendingAssistant;
-        const currentState = autoContinueRef.current;
+        const currentPending = viewing
+          ? st.pendingAssistant
+          : (st.project ? (st.project.skillSessions?.[skillId]?.pendingAssistant ?? '') : '');
+        const currentState = autoContinue;
 
         if (shouldAutoContinue(e.finishReason, currentPending, currentState)) {
           const nextState: AutoContinueState = {
@@ -74,39 +89,54 @@ export function Studio() {
             attempts: currentState.attempts + 1,
             isAutoContinuing: true,
           };
-          syncAutoContinue(nextState);
+          setAutoContinue(nextState);
           bufferBeforeContinueRef.current = currentPending;
-          void sendUserMessage(
-            DEFAULT_AUTO_CONTINUE_CONFIG.continuePrompt,
-            { silentContinue: true },
-          );
+          if (viewing) {
+            void sendUserMessage(
+              DEFAULT_AUTO_CONTINUE_CONFIG.continuePrompt,
+              { skipAppend: false },
+            );
+          }
         } else {
-          syncAutoContinue({ ...currentState, isAutoContinuing: false });
-          autoContinueKickRef.current = false;
+          setAutoContinue((s) => ({ ...s, isAutoContinuing: false }));
           void finishStream().then(() => {
-            // After finishStreaming commits the message, trigger image pipeline
-            // if the artifact is complete (tasks 8.1, 8.5)
-            const st = useStudio.getState();
-            if (!st.project) return;
-            const lastMsg = st.project.conversation.findLast((m) => m.role === 'assistant');
+            const after = useStudio.getState();
+            if (!after.project || after.selectedSkillId !== skillId) return;
+            const lastMsg = after.project.conversation.findLast((m) => m.role === 'assistant');
             if (!lastMsg) return;
             const art = extractArtifact(lastMsg.content);
             if (!art?.complete) return;
-            // Run image pipeline asynchronously without blocking UI
-            void runImagePipeline(art.html, st.project.id);
+
+            if (shouldRunImagePipeline(after.project.conversation)) {
+              void runImagePipeline(art.html, after.project.id, skillId);
+              return;
+            }
+
+            if (shouldPromptForImagePermission(after.project.conversation, skillId)) {
+              const proposal = prepareImagePermissionPrompt(
+                art.html,
+                after.project.id,
+                skillId,
+                after.project.name,
+              );
+              if (proposal) setImageGenPrompt(proposal);
+            }
+
+            void maybePersistLintFixes(art.html, after.project.id, skillId);
           });
         }
-      } else if (e.type === 'stalled') useStudio.getState().markStalled(e.sinceMs);
-      else if (e.type === 'retry')   useStudio.getState().markRetry(e.attempt, e.waitMs, e.reason);
-      else if (e.type === 'error') {
+      } else if (e.type === 'stalled') {
+        useStudio.getState().markStalled(e.sinceMs);
+      } else if (e.type === 'retry') {
+        useStudio.getState().markRetry(e.attempt, e.waitMs, e.reason);
+      } else if (e.type === 'error') {
         toast(e.message, 'err');
-        syncAutoContinue({ ...autoContinueRef.current, isAutoContinuing: false });
-        autoContinueKickRef.current = false;
+        setAutoContinue((s) => ({ ...s, isAutoContinuing: false }));
         void finishStream();
       }
     });
     return off;
-  }, [appendDelta, finishStream, toast]);
+  }, [appendDelta, finishStream, toast, autoContinue]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -121,7 +151,7 @@ export function Studio() {
   );
 
   // Run the image pipeline on a completed artifact (tasks 8.1–8.5)
-  const runImagePipeline = async (html: string, projectId: string) => {
+  const runImagePipeline = async (html: string, projectId: string, skillId?: string) => {
     try {
       const st = useStudio.getState();
       const ds = designSystems.find((d) => d.id === st.selectedDesignSystemId);
@@ -130,8 +160,16 @@ export function Studio() {
 
       setImageGenProgress({ done: 0, total: 0 });
 
+      let htmlForPipeline = html;
+      if (skillId === 'product-deck') {
+        htmlForPipeline = enrichProductDeckHtml(html, {
+          productName: projName,
+          finalize: true,
+        }).html;
+      }
+
       const { html: enrichedHtml, imagesGenerated } = await processArtifactImages(
-        html,
+        htmlForPipeline,
         projectId,
         {
           designSystem: ds,
@@ -165,54 +203,38 @@ export function Studio() {
     }
   };
 
-  const sendUserMessage = async (
-    content: string,
-    opts?: { skipAppend?: boolean; attachments?: any[]; silentContinue?: boolean },
-  ) => {
+  const sendUserMessage = async (content: string, opts?: { skipAppend?: boolean; attachments?: any[] }) => {
     if (!project || (!content.trim() && !opts?.attachments?.length)) return;
     const id = project.id + ':' + Date.now();
     conversationIdRef.current = id;
+    bindConversation(id);
 
-    const continuing = opts?.silentContinue || autoContinueRef.current.isAutoContinuing;
-    if (!continuing) {
-      syncAutoContinue(createInitialAutoState());
+    // Reset auto-continue state for a fresh user-initiated message
+    // (but not when auto-continue itself is sending the continuation prompt)
+    if (!autoContinue.isAutoContinuing) {
+      setAutoContinue(createInitialAutoState());
       bufferBeforeContinueRef.current = '';
-      streamStartedAtRef.current = Date.now();
     }
 
-    const designTokens = selectedDesignSystemId
-      ? (await window.renoir.getDesignSystem(selectedDesignSystemId))?.tokens
-      : undefined;
+    if (!opts?.skipAppend) await useStudio.getState().appendUser(content, opts?.attachments);
+    const next = useStudio.getState().project;
+    if (!next) return;
 
+    const briefAnswers = extractBriefFromConversation(next.conversation);
     const composed = composeSystemPrompt({
       skill,
       primer: skill ? (await window.renoir.getSkillPrimer(skill.id)) ?? undefined : undefined,
       designSystem,
-      designTokens,
+      designTokens: designSystem?.tokens,
       direction,
-      answers,
+      answers: { ...briefAnswers, ...answers },
     });
-
-    if (!opts?.skipAppend && !opts?.silentContinue) {
-      await useStudio.getState().appendUser(content, opts?.attachments);
-    }
-    const next = useStudio.getState().project;
-    if (!next) return;
 
     startStreaming();
 
-    const convMessages = next.conversation.map((m) => ({
-      role: m.role as 'system' | 'user' | 'assistant',
-      content: m.content,
-      attachments: m.attachments,
-    }));
-
     if (selectedAgentId && selectedAgentId !== 'byok') {
-      const flat = [
-        composed.system,
-        ...convMessages.map((m) => `${m.role.toUpperCase()}: ${m.content}`),
-        ...(opts?.silentContinue ? [`USER: ${content}`] : []),
-      ].join('\n\n');
+      // Route through CLI agent — single-shot prompt with the system context inline.
+      const flat = [composed.system, ...next.conversation.map((m) => `${m.role.toUpperCase()}: ${m.content}`)].join('\n\n');
       const res = await window.renoir.invokeAgent({ agentId: selectedAgentId, conversationId: id, prompt: flat });
       if (!res.ok) {
         toast(res.error || 'Could not invoke agent', 'err');
@@ -223,11 +245,12 @@ export function Studio() {
 
     const messages: { role: 'system' | 'user' | 'assistant'; content: string; attachments?: any[] }[] = [
       { role: 'system', content: composed.system },
-      ...convMessages,
+      ...next.conversation.map((m) => ({
+        role: m.role as any,
+        content: m.content,
+        attachments: m.attachments,
+      })),
     ];
-    if (opts?.silentContinue) {
-      messages.push({ role: 'user', content });
-    }
     const res = await window.renoir.chatStart({ conversationId: id, messages });
     if (!res.ok) {
       toast(res.error || 'Could not start chat', 'err');
@@ -258,127 +281,113 @@ export function Studio() {
 
   const lastAssistant = project?.conversation.findLast((m) => m.role === 'assistant');
   const liveExtracted = isStreaming ? extractArtifact(pendingAssistant) : null;
+  // If the user restored a historical version, render it instead of the latest.
   const activeVersion = project?.activeVersionId
     ? project.versions?.find((v) => v.id === project.activeVersionId)
     : null;
-
-  // Only render *complete* artifacts in the preview — partial HTML flashes
-  // white/black and shows raw markup while the model is still streaming.
-  const lastUserIdx = project?.conversation.findLastIndex((m) => m.role === 'user') ?? -1;
-  const lastAssistantIdx = project?.conversation.findLastIndex((m) => m.role === 'assistant') ?? -1;
-  const awaitingNewArtifact = Boolean(project && lastUserIdx > lastAssistantIdx);
-
-  const completeArtifactHtml = useMemo(() => {
-    if (activeVersion?.html) return activeVersion.html;
-    if (liveExtracted?.complete) return liveExtracted.html;
-    if (!isStreaming && lastAssistant) {
-      const finished = extractArtifact(lastAssistant.content);
-      if (finished?.complete) return finished.html;
+  // Persist the preview between turns: while streaming a new turn that
+  // has not produced an <artifact> yet, fall back to the last completed one.
+  const fallbackExtracted = (() => {
+    if (activeVersion) {
+      return { html: activeVersion.html, complete: true };
+    }
+    const cachedHtml = previewHtmlForSkill(project!, selectedSkillId);
+    if (cachedHtml) {
+      return { html: cachedHtml, complete: true };
+    }
+    if (lastAssistant) {
+      return extractArtifact(lastAssistant.content);
     }
     return null;
-  }, [activeVersion, liveExtracted, isStreaming, lastAssistant]);
-
-  const previewArtifact = awaitingNewArtifact && !liveExtracted?.complete ? null : completeArtifactHtml;
-
-  const fallbackExtracted = activeVersion
-    ? { html: activeVersion.html, complete: true }
-    : (lastAssistant ? extractArtifact(lastAssistant.content) : null);
+  })();
+  const extracted = liveExtracted || fallbackExtracted;
+  const artifactHtml = extracted?.html || null;
+  const artifactResetKey = activeVersion?.id
+    ? `version-${activeVersion.id}`
+    : (project?.conversation.findLast((m) => m.role === 'user')?.ts
+      ?? String(project?.conversation.length ?? 0));
   const liveText = isStreaming ? pendingAssistant : (lastAssistant?.content || '');
-  const directGenerate = usesDirectArtifactGeneration(skill);
-  const questionForm = directGenerate || liveExtracted || fallbackExtracted?.complete
-    ? null
-    : extractQuestionForm(liveText);
-  const stalledOnQuestionForm = Boolean(
-    directGenerate && !isStreaming && lastAssistant && !fallbackExtracted?.complete && extractQuestionForm(lastAssistant.content),
-  );
+  const briefLocked = hasLockedBrief(project?.conversation ?? []);
+  const questionForm = !briefLocked && !liveExtracted && !fallbackExtracted
+    ? extractQuestionForm(liveText)
+    : null;
 
-  const truncated = Boolean(!isStreaming && lastAssistant && fallbackExtracted && !fallbackExtracted.complete);
+  // If the last finished assistant message has an *unclosed* artifact, we
+  // suspect a truncation. Surface a Continue affordance so the user can
+  // resume without retyping context.
+  const truncated = !isStreaming && lastAssistant && extracted && !extracted.complete;
+  const continueLast = async () => {
+    if (!project) return;
+    void sendUserMessage('Continue from where you stopped. Finish the artifact in full.', { skipAppend: false });
+  };
 
-  // If the model emitted a question form on a direct-generate skill, nudge it to render.
-  useEffect(() => {
-    if (!project || isStreaming || autoContinueRef.current.isAutoContinuing) return;
-    if (!stalledOnQuestionForm) { questionFormKickRef.current = false; return; }
-    if (questionFormKickRef.current) return;
-    questionFormKickRef.current = true;
-    const nextState: AutoContinueState = {
-      ...autoContinueRef.current,
-      attempts: autoContinueRef.current.attempts + 1,
-      isAutoContinuing: true,
-    };
-    syncAutoContinue(nextState);
-    bufferBeforeContinueRef.current = lastAssistant?.content || '';
-    void sendUserMessage(
-      skill?.id === 'pricing-page'
-        ? 'Skip the question form. Generate the full pricing page artifact now. Use Free / Standard / Premium defaults with domain-appropriate copy for anything missing.'
-        : 'Skip the question form. Generate the full artifact now using sensible defaults for anything missing in the brief.',
-      { silentContinue: true },
-    );
-  }, [stalledOnQuestionForm, isStreaming, project, lastAssistant?.content]);
+  // Cancel auto-continuation: stop the stream and revert to manual mode
+  const cancelAutoContinue = async () => {
+    setAutoContinue((s) => ({ ...s, isAutoContinuing: false, enabled: false }));
+    await cancel();
+  };
 
-  // Safety net: if a turn ended with an open artifact, resume automatically.
-  useEffect(() => {
-    if (!project || isStreaming || autoContinueRef.current.isAutoContinuing) return;
-    if (!truncated) { autoContinueKickRef.current = false; return; }
-    if (autoContinueRef.current.attempts >= autoContinueRef.current.maxAttempts) return;
-    if (autoContinueKickRef.current) return;
-    autoContinueKickRef.current = true;
-    const nextState: AutoContinueState = {
-      ...autoContinueRef.current,
-      attempts: autoContinueRef.current.attempts + 1,
-      isAutoContinuing: true,
-    };
-    syncAutoContinue(nextState);
-    bufferBeforeContinueRef.current = lastAssistant?.content || '';
-    void sendUserMessage(DEFAULT_AUTO_CONTINUE_CONFIG.continuePrompt, { silentContinue: true });
-  }, [truncated, isStreaming, project, lastAssistant?.content]);
-
+  // Whether auto-continue exhausted its attempts without completing
   const autoContinueExhausted = !autoContinue.isAutoContinuing
     && autoContinue.attempts >= autoContinue.maxAttempts
     && truncated;
 
-  const generationPhase = inferPhase(
-    isStreaming ? pendingAssistant : (lastAssistant?.content || ''),
-    Date.now() - streamStartedAtRef.current,
-  );
-  const isGenerating = isStreaming || autoContinue.isAutoContinuing || (truncated && !autoContinueExhausted);
-  const showPreviewLoading = Boolean(isGenerating && !previewArtifact);
-
-  const continueLast = async () => {
-    if (!project) return;
-    void sendUserMessage('Continue from where you stopped. Finish the artifact in full.', { silentContinue: true });
-  };
-
-  const cancelAutoContinue = async () => {
-    syncAutoContinue({ ...autoContinueRef.current, isAutoContinuing: false, enabled: false });
-    autoContinueKickRef.current = false;
-    await cancel();
-  };
-
-  if (!project) {
-    return (
-      <div className="flex h-full flex-col">
-        <StudioLayout
-          chat={<ChatPane onSend={(content, attachments) => sendUserMessage(content, { attachments })} onCancel={cancel} onRegenerate={regenerateFrom} questionForm={null} directGenerate={false} autoContinue={autoContinue} onCancelAutoContinue={cancelAutoContinue} />}
-          preview={<PreviewPane artifact={null} />}
-        />
-      </div>
-    );
-  }
+  if (!project) return <EmptyState />;
 
   return (
     <div className="flex h-full flex-col">
-      {autoContinueExhausted && (
+      <ConfirmDialog
+        open={!!imageGenPrompt}
+        title="Generate slide images?"
+        message={
+          imageGenPrompt ? (
+            <>
+              This deck has <span className="text-foreground font-medium">{imageGenPrompt.slotCount}</span> image
+              {imageGenPrompt.slotCount === 1 ? '' : 's'} ready for AI generation (cover and feature slides).
+              Generate photos now? You can skip and keep the text-only preview.
+            </>
+          ) : null
+        }
+        confirmLabel="Generate images"
+        cancelLabel="Not now"
+        onConfirm={() => {
+          if (!imageGenPrompt) return;
+          const { html, projectId, skillId } = imageGenPrompt;
+          setImageGenPrompt(null);
+          void runImagePipeline(html, projectId, skillId);
+        }}
+        onCancel={() => setImageGenPrompt(null)}
+      />
+      {truncated && (
         <div className="px-4 py-2 bg-amber-500/15 border-b border-amber-500/40 text-[12px] text-amber-800 dark:text-amber-200 flex items-center gap-2">
           <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-          Generation stopped before the artifact finished.
-          <button onClick={continueLast} className="ml-auto btn-quiet">
-            Try again
-          </button>
+          {autoContinue.isAutoContinuing ? (
+            <>
+              Auto-continuing… (attempt {autoContinue.attempts}/{autoContinue.maxAttempts})
+              <button onClick={cancelAutoContinue} className="ml-auto btn-quiet">
+                Stop
+              </button>
+            </>
+          ) : autoContinueExhausted ? (
+            <>
+              Auto-continue exhausted — artifact may need manual completion.
+              <button onClick={continueLast} className="ml-auto btn-quiet">
+                Continue manually
+              </button>
+            </>
+          ) : (
+            <>
+              Generation paused — click to resume.
+              <button onClick={continueLast} className="ml-auto btn-quiet">
+                Continue
+              </button>
+            </>
+          )}
         </div>
       )}
       <StudioLayout
-        chat={<ChatPane onSend={(content, attachments) => sendUserMessage(content, { attachments })} onCancel={cancel} onRegenerate={regenerateFrom} questionForm={questionForm} directGenerate={directGenerate} autoContinue={autoContinue} onCancelAutoContinue={cancelAutoContinue} />}
-        preview={<PreviewPane artifact={previewArtifact} loading={showPreviewLoading} loadingPhase={generationPhase} imageGenProgress={imageGenProgress} />}
+        chat={<ChatPane onSend={(content, attachments) => sendUserMessage(content, { attachments })} onCancel={cancel} onRegenerate={regenerateFrom} onReloadPreview={() => window.dispatchEvent(new CustomEvent('renoir:reload-preview'))} hasPreview={Boolean(artifactHtml)} questionForm={questionForm} autoContinue={autoContinue} onCancelAutoContinue={cancelAutoContinue} />}
+        preview={<PreviewPane key={selectedSkillId ?? 'default'} artifact={artifactHtml} streaming={isStreaming && !!liveExtracted && !liveExtracted.complete} imageGenProgress={imageGenProgress} artifactResetKey={artifactResetKey} />}
       />
     </div>
   );
@@ -394,7 +403,7 @@ function StudioLayout({ chat, preview }: { chat: React.ReactNode; preview: React
   return (
     <div className="flex flex-1 min-h-0">
       {!previewFull && <LeftRail />}
-      <div ref={containerRef} className="flex-1 flex min-w-0">
+      <div ref={containerRef} className="flex-1 flex min-w-0 min-h-0 h-full">
         {!previewFull && !chatCollapsed && (
           <>
             <div style={{ width: `${chatWidth}%` }} className="flex min-w-0">
@@ -414,12 +423,68 @@ function StudioLayout({ chat, preview }: { chat: React.ReactNode; preview: React
             </svg>
           </button>
         )}
-        <div className={previewFull ? 'flex-1 min-w-0' : 'flex-1 min-w-0'}>
+        <div className="flex-1 min-w-0 min-h-0 h-full flex flex-col">
           {preview}
         </div>
       </div>
     </div>
   );
+}
+
+function prepareImagePermissionPrompt(
+  html: string,
+  projectId: string,
+  skillId: string,
+  productName?: string,
+): { html: string; projectId: string; skillId: string; slotCount: number } | null {
+  let prepared = html;
+  if (skillId === 'product-deck') {
+    prepared = enrichProductDeckHtml(html, { productName, finalize: true }).html;
+  }
+  const slotCount = extractPlaceholders(prepared).length;
+  if (slotCount === 0) return null;
+  return { html: prepared, projectId, skillId, slotCount };
+}
+
+async function maybePersistLintFixes(html: string, projectId: string, skillId?: string) {
+  try {
+    const st = useStudio.getState();
+    const title = st.project?.name?.trim() || 'Artifact';
+    const repair = await repairArtifactIfNeeded(
+      html,
+      {
+        title,
+        viewportWidth: 1280,
+        dashboard: skillId === 'dashboard',
+        productDeck: skillId === 'product-deck',
+        productName: title,
+        productDeckFinalize: true,
+      },
+      window.renoir.lintArtifact,
+    );
+    if (!repair.improved) return;
+
+    const fixedCount = repair.before.findings.length - repair.after.findings.length;
+    const verRes = await window.renoir.addVersion({
+      id: projectId,
+      html: repair.html,
+      source: 'assistant',
+      skillId,
+      note: `Auto-fixed ${fixedCount} lint finding(s)`,
+    });
+    if (!verRes.ok || !verRes.project) return;
+
+    let next = patchSkillSession(verRes.project, skillId, {
+      previewHtml: repair.html,
+      versions: getSkillSession(verRes.project, skillId).versions,
+    });
+    if (skillId === st.selectedSkillId) {
+      next = applySession(next, skillId);
+    }
+    useStudio.getState().setProject(next);
+  } catch {
+    /* keep original artifact on failure */
+  }
 }
 
 function EmptyState() {

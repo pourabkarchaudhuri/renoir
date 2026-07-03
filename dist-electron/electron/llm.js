@@ -36,37 +36,11 @@ function isAzureHost(baseUrl) {
         || u.includes('.cognitiveservices.azure.com')
         || u.includes('.services.ai.azure.com');
 }
-// Reasoning models (gpt-5, o1, o3, o4, …) reject the `temperature` param —
-// they only support the default. Omit it for those to avoid 400s.
-function supportsTemperature(model) {
-    const m = (model || '').toLowerCase();
-    if (/(^|[^a-z])gpt-5/.test(m))
-        return false;
-    if (/(^|[^a-z])o[134](-|$|[^a-z0-9])/.test(m))
-        return false;
-    return true;
-}
 /** Foundry "Projects v1" URLs end with /openai/v1/responses or expose the
  *  Responses API. Detect to switch protocol from chat-completions to responses. */
 function looksLikeResponsesEndpoint(endpoint) {
     const u = (endpoint || '').toLowerCase();
     return /\/openai\/v1(\/responses)?\/?$/.test(u) || u.includes('/openai/v1/responses');
-}
-/** Reasoning / fixed-sampling models reject `temperature` and related params. */
-export function modelSupportsTemperature(model) {
-    const m = (model || '').trim().toLowerCase();
-    if (!m)
-        return true;
-    if (m === 'gpt-5' || m.startsWith('gpt-5-') || m.startsWith('gpt-5.'))
-        return false;
-    if (/^o\d/.test(m))
-        return false;
-    return true;
-}
-function samplingParams(model, temperature) {
-    if (!modelSupportsTemperature(model))
-        return {};
-    return { temperature: temperature ?? 0.7 };
 }
 async function resolveRoute() {
     const cfg = store.getByok();
@@ -219,15 +193,36 @@ function dataUrlParts(dataUrl) {
     const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
     return m ? { mime: m[1], base64: m[2] } : null;
 }
+/** Reasoning / fixed-sampling models reject `temperature` and related params. */
+export function modelSupportsTemperature(model) {
+    const m = (model || '').trim().toLowerCase();
+    if (!m)
+        return true;
+    if (m === 'gpt-5' || m.startsWith('gpt-5-') || m.startsWith('gpt-5.'))
+        return false;
+    if (/^o\d/.test(m))
+        return false;
+    return true;
+}
+/** Azure Responses API rejects `temperature` regardless of model name. */
+function routeSupportsTemperature(kind) {
+    return kind !== 'azure-responses';
+}
+function withTemperature(body, kind, temperature) {
+    const model = String(body.model || '');
+    if (!routeSupportsTemperature(kind) || !modelSupportsTemperature(model))
+        return body;
+    return { ...body, temperature: temperature ?? 0.7 };
+}
+function temperatureUnsupported(status, bodyText) {
+    return status === 400
+        && /temperature/i.test(bodyText)
+        && /not supported|unsupported/i.test(bodyText);
+}
 async function runOnce(args) {
     const { conversationId, route, messages, temperature, ctrl, call } = args;
     const headers = { 'Content-Type': 'application/json' };
     let bodyJson;
-    // Some models (gpt-5 / o-series reasoning) reject `temperature`. Only send
-    // it when the target model supports it.
-    const temp = supportsTemperature(route.model)
-        ? { temperature: temperature ?? 0.7 }
-        : {};
     // Pre-process messages: inline text attachments and collect image attachments
     const processedMessages = messages.map((m) => {
         const content = inlineTextAttachments(m.content, m.attachments);
@@ -239,15 +234,10 @@ async function runOnce(args) {
         headers['anthropic-version'] = '2023-06-01';
         const sys = processedMessages.find((m) => m.role === 'system')?.content;
         const rest = processedMessages.filter((m) => m.role !== 'system');
-        bodyJson = {
+        bodyJson = withTemperature({
             model: route.model,
             max_tokens: 16384,
             stream: true,
-<<<<<<< Updated upstream
-            ...samplingParams(route.model, temperature),
-=======
-            ...temp,
->>>>>>> Stashed changes
             ...(sys ? { system: sys } : {}),
             messages: rest.map((m) => {
                 const imgs = m.images;
@@ -268,7 +258,7 @@ async function runOnce(args) {
                 }
                 return { role: m.role, content: m.content };
             }),
-        };
+        }, route.kind, temperature);
     }
     else if (route.kind === 'azure-responses') {
         // Azure Foundry Responses API — different body shape.
@@ -276,14 +266,9 @@ async function runOnce(args) {
         headers.Authorization = `Bearer ${route.apiKey}`;
         const sys = processedMessages.find((m) => m.role === 'system')?.content;
         const rest = processedMessages.filter((m) => m.role !== 'system');
-        bodyJson = {
+        bodyJson = withTemperature({
             model: route.model,
             stream: true,
-<<<<<<< Updated upstream
-            ...samplingParams(route.model, temperature),
-=======
-            ...temp,
->>>>>>> Stashed changes
             ...(sys ? { instructions: sys } : {}),
             input: rest.map((m) => {
                 const imgs = m.images;
@@ -303,13 +288,13 @@ async function runOnce(args) {
                 }
                 return { role: m.role, content: m.content };
             }),
-        };
+        }, route.kind, temperature);
     }
     else if (route.kind === 'azure') {
         // Azure chat/completions — api-key header; model is the deployment name.
         headers['api-key'] = route.apiKey;
         headers.Authorization = `Bearer ${route.apiKey}`;
-        bodyJson = {
+        bodyJson = withTemperature({
             model: route.model,
             messages: processedMessages.map((m) => {
                 const imgs = m.images;
@@ -329,18 +314,13 @@ async function runOnce(args) {
                 }
                 return { role: m.role, content: m.content };
             }),
-<<<<<<< Updated upstream
-            ...samplingParams(route.model, temperature),
-=======
-            ...temp,
->>>>>>> Stashed changes
             stream: true,
-        };
+        }, route.kind, temperature);
     }
     else {
         // OpenAI-compatible
         headers.Authorization = `Bearer ${route.apiKey}`;
-        bodyJson = {
+        bodyJson = withTemperature({
             model: route.model,
             messages: processedMessages.map((m) => {
                 const imgs = m.images;
@@ -360,20 +340,25 @@ async function runOnce(args) {
                 }
                 return { role: m.role, content: m.content };
             }),
-<<<<<<< Updated upstream
-            ...samplingParams(route.model, temperature),
-=======
-            ...temp,
->>>>>>> Stashed changes
             stream: true,
-        };
+        }, route.kind, temperature);
     }
-    const res = await fetch(route.url, {
+    let res = await fetch(route.url, {
         method: 'POST',
         headers,
         body: JSON.stringify(bodyJson),
         signal: ctrl.signal,
     });
+    if (!res.ok && temperatureUnsupported(res.status, await res.clone().text().catch(() => ''))) {
+        const { temperature: _drop, ...rest } = bodyJson;
+        bodyJson = rest;
+        res = await fetch(route.url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(bodyJson),
+            signal: ctrl.signal,
+        });
+    }
     if (!res.ok || !res.body) {
         const text = await res.text().catch(() => '');
         const transient = shouldRetry(null, res.status);

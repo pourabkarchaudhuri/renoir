@@ -3,7 +3,9 @@ import type {
   ProjectRecord, SkillSummary, DesignSystemSummary, ByokConfig, AzureStatus, ProjectMessage,
   PromptTemplate, VisualDirection, AgentRecord, TemplateRecord,
 } from '@/types/global';
-import { loadSession, syncActiveSession, projectHasSkillWork, clearInheritedStudyTitle } from '@/lib/skill-sessions';
+import { hydrateProject, switchSkillSession, syncActiveSession, patchSkillSession, getSkillSession, streamStateForSkill, conversationForSkill, withInProgressAssistant, applySession, loadSession, projectHasSkillWork, clearInheritedStudyTitle } from '@/lib/skill-sessions';
+import { loadPreviewSurface, savePreviewSurface, type PreviewSurface } from '@/lib/preview-surfaces';
+import { saveWorkspaceSnapshot } from '@/lib/workspace-persist';
 
 export type Route = 'home' | 'studio' | 'gallery' | 'settings' | 'media';
 
@@ -28,12 +30,18 @@ export interface Job {
   params?: Record<string, unknown>;
 }
 
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface UIState {
   route: Route;
   setRoute: (r: Route) => void;
-  toasts: { id: string; tone: 'info' | 'ok' | 'warn' | 'err'; text: string }[];
-  toast: (text: string, tone?: 'info' | 'ok' | 'warn' | 'err') => void;
+  toasts: { id: string; tone: 'info' | 'ok' | 'warn' | 'err'; text: string; action?: ToastAction }[];
+  toast: (text: string, tone?: 'info' | 'ok' | 'warn' | 'err', action?: ToastAction) => void;
   dismissToast: (id: string) => void;
+  refreshToastDismiss: (id: string, ms?: number) => void;
   theme: 'dark' | 'light';
   setTheme: (t: 'dark' | 'light') => void;
   paletteOpen: boolean;
@@ -58,6 +66,8 @@ interface UIState {
   toggleChat: () => void;
   railCollapsed: boolean;
   toggleRail: () => void;
+  previewSurface: PreviewSurface;
+  setPreviewSurface: (s: PreviewSurface) => void;
 }
 
 const initialTheme = (typeof localStorage !== 'undefined' && localStorage.getItem('renoir.theme')) === 'light' ? 'light' : 'dark';
@@ -73,16 +83,41 @@ const initialRailCollapsed = (() => {
   catch { return false; }
 })();
 
+const toastTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function toastDismissMs(tone: 'info' | 'ok' | 'warn' | 'err'): number {
+  if (tone === 'err') return 15_000;
+  if (tone === 'warn') return 10_000;
+  return 5_000;
+}
+
 export const useUI = create<UIState>((set, get) => ({
   route: 'home',
-  setRoute: (r) => set({ route: r }),
-  toasts: [],
-  toast: (text, tone = 'info') => {
-    const id = Math.random().toString(36).slice(2);
-    set((s) => ({ toasts: [...s.toasts, { id, tone, text }] }));
-    setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 3600);
+  setRoute: (r) => {
+    set({ route: r });
+    saveWorkspaceSnapshot({ route: r });
   },
-  dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  toasts: [],
+  toast: (text, tone = 'info', action) => {
+    const id = Math.random().toString(36).slice(2);
+    set((s) => ({ toasts: [...s.toasts, { id, tone, text, action }] }));
+    get().refreshToastDismiss(id, action ? 8_000 : toastDismissMs(tone));
+  },
+  refreshToastDismiss: (id, ms = 60_000) => {
+    const prev = toastTimers.get(id);
+    if (prev) clearTimeout(prev);
+    const timer = setTimeout(() => {
+      toastTimers.delete(id);
+      set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+    }, ms);
+    toastTimers.set(id, timer);
+  },
+  dismissToast: (id) => {
+    const prev = toastTimers.get(id);
+    if (prev) clearTimeout(prev);
+    toastTimers.delete(id);
+    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+  },
   theme: initialTheme as 'dark' | 'light',
   setTheme: (t) => {
     try { localStorage.setItem('renoir.theme', t); } catch { /* swallow */ }
@@ -150,6 +185,11 @@ export const useUI = create<UIState>((set, get) => ({
     try { localStorage.setItem('renoir.railCollapsed', next ? '1' : '0'); } catch { /* swallow */ }
     return { railCollapsed: next };
   }),
+  previewSurface: loadPreviewSurface(),
+  setPreviewSurface: (s) => {
+    savePreviewSurface(s);
+    set({ previewSurface: s });
+  },
 }));
 
 interface CatalogState {
@@ -213,6 +253,9 @@ interface StudioState {
   selectedDirectionId?: string;
   selectedAgentId?: string;          // 'byok' or a CLI agent id
   questionAnswers: Record<string, string>;
+  /** Skill that owns the active LLM stream (may differ from selectedSkillId). */
+  streamingSkillId?: string;
+  activeConversationId?: string;
 
   setProject: (rec: ProjectRecord | null) => void;
   setDraft: (s: string) => void;
@@ -223,12 +266,14 @@ interface StudioState {
   setAgent: (id?: string) => void;
   setAnswer: (key: string, value: string) => void;
   resetAnswers: () => void;
+  bindConversation: (conversationId: string) => void;
   startStreaming: () => void;
   appendAssistantDelta: (s: string) => void;
   finishStreaming: () => Promise<void>;
   appendUser: (content: string, attachments?: any[]) => Promise<void>;
   markStalled: (sinceMs: number) => void;
   markRetry: (attempt: number, waitMs: number, reason: string) => void;
+  flushProject: () => Promise<void>;
 }
 
 export const useStudio = create<StudioState>((set, get) => ({
@@ -244,6 +289,8 @@ export const useStudio = create<StudioState>((set, get) => ({
   selectedDirectionId: undefined,
   selectedAgentId: 'byok',
   questionAnswers: {},
+  streamingSkillId: undefined,
+  activeConversationId: undefined,
 
   setProject: (rec) => {
     if (!rec) {
@@ -255,24 +302,92 @@ export const useStudio = create<StudioState>((set, get) => ({
         selectedDirectionId: undefined,
         selectedAgentId: 'byok',
         questionAnswers: {},
+        streamingSkillId: undefined,
+        activeConversationId: undefined,
+        isStreaming: false,
+        pendingAssistant: '',
+        streamStatus: 'idle',
+        retryNote: undefined,
       });
       return;
     }
-    const st = get();
-    const skillId = st.selectedSkillId ?? rec.skillId ?? 'web-prototype';
-    const loaded = loadSession(rec, skillId);
+    const skillId = rec.skillId ?? get().selectedSkillId;
+    const synced = syncActiveSession(rec, skillId);
+    const project = hydrateProject(synced);
+    const session = getSkillSession(project, skillId);
+    const streamingSkillId = Object.entries(project.skillSessions ?? {}).find(([, s]) => s.isStreaming)?.[0]
+      ?? (session.isStreaming ? skillId : undefined);
+    const stream = streamStateForSkill(
+      streamingSkillId ? getSkillSession(project, streamingSkillId) : session,
+      streamingSkillId === skillId,
+    );
     set({
-      projectId: loaded.id,
-      project: loaded,
-      selectedSkillId: skillId,
-      selectedDesignSystemId: rec.designSystemId,
-      selectedDirectionId: rec.visualDirectionId,
-      selectedAgentId: rec.agentId || 'byok',
+      projectId: project.id,
+      project,
+      selectedSkillId: project.skillId ?? get().selectedSkillId,
+      selectedDesignSystemId: project.designSystemId,
+      selectedDirectionId: project.visualDirectionId,
+      selectedAgentId: project.agentId || 'byok',
       questionAnswers: {},
+      streamingSkillId,
+      activeConversationId: streamingSkillId
+        ? getSkillSession(project, streamingSkillId).conversationId
+        : undefined,
+      pendingAssistant: stream.pendingAssistant,
+      isStreaming: stream.isStreaming,
+      streamStatus: stream.streamStatus,
+      retryNote: stream.retryNote,
+    });
+    saveWorkspaceSnapshot({
+      projectId: project.id,
+      skillId: project.skillId ?? get().selectedSkillId,
+      route: useUI.getState().route,
     });
   },
   setDraft: (s) => set({ draft: s }),
-  setSkill: (id) => set({ selectedSkillId: id, questionAnswers: {} }),
+  setSkill: (id) => {
+    const st = get();
+    if (!st.project) {
+      set({ selectedSkillId: id, questionAnswers: {} });
+      return;
+    }
+    if (st.selectedSkillId === id) {
+      set({ questionAnswers: {} });
+      return;
+    }
+
+    const fromId = st.selectedSkillId;
+    const fromStream = {
+      pendingAssistant: st.streamingSkillId === fromId
+        ? st.pendingAssistant
+        : getSkillSession(st.project, fromId).pendingAssistant,
+      isStreaming: st.streamingSkillId === fromId && st.isStreaming,
+      streamStatus: st.streamingSkillId === fromId ? st.streamStatus : getSkillSession(st.project, fromId).streamStatus,
+      retryNote: st.streamingSkillId === fromId ? st.retryNote : getSkillSession(st.project, fromId).retryNote,
+      conversationId: st.streamingSkillId === fromId
+        ? (st.activeConversationId ?? getSkillSession(st.project, fromId).conversationId)
+        : getSkillSession(st.project, fromId).conversationId,
+    };
+
+    let next = switchSkillSession(st.project, fromId, id, fromStream);
+    next = { ...next, updatedAt: new Date().toISOString() };
+    void window.renoir.saveProject(next);
+
+    const toSession = getSkillSession(next, id);
+    const stream = streamStateForSkill(toSession, st.streamingSkillId === id);
+
+    set({
+      selectedSkillId: id,
+      questionAnswers: {},
+      project: next,
+      pendingAssistant: stream.pendingAssistant,
+      isStreaming: stream.isStreaming,
+      streamStatus: stream.streamStatus,
+      retryNote: stream.retryNote,
+      activeConversationId: st.streamingSkillId === id ? toSession.conversationId : st.activeConversationId,
+    });
+    saveWorkspaceSnapshot({ skillId: id, projectId: next.id, route: useUI.getState().route });
+  },
   switchSkill: async (newSkillId) => {
     const st = get();
     if (!newSkillId || newSkillId === st.selectedSkillId) return;
@@ -290,38 +405,29 @@ export const useStudio = create<StudioState>((set, get) => ({
 
       let loaded = clearInheritedStudyTitle(loadSession(saved, newSkillId), newSkillId);
       if (projectHasSkillWork(loaded, newSkillId)) {
-        set({ selectedSkillId: newSkillId, projectId: loaded.id, project: loaded, questionAnswers: {}, draft: '' });
+        get().setProject(loaded);
+        set({ questionAnswers: {}, draft: '' });
         return;
       }
 
       const other = await pickProjectForSkill(saved);
       if (other) {
         const opened = clearInheritedStudyTitle(loadSession(other, newSkillId), newSkillId);
-        set({
-          selectedSkillId: newSkillId,
-          projectId: opened.id,
-          project: opened,
-          questionAnswers: {},
-          draft: '',
-        });
+        get().setProject(opened);
+        set({ questionAnswers: {}, draft: '' });
         return;
       }
 
-      // Keep the study open with an empty skill session — avoids a null-project crash path.
-      set({ selectedSkillId: newSkillId, projectId: loaded.id, project: loaded, questionAnswers: {}, draft: '' });
+      get().setProject(loaded);
+      set({ questionAnswers: {}, draft: '' });
       return;
     }
 
     const match = await pickProjectForSkill();
     if (match) {
       const opened = clearInheritedStudyTitle(loadSession(match, newSkillId), newSkillId);
-      set({
-        selectedSkillId: newSkillId,
-        projectId: opened.id,
-        project: opened,
-        questionAnswers: {},
-        draft: '',
-      });
+      get().setProject(opened);
+      set({ questionAnswers: {}, draft: '' });
     } else {
       set({ selectedSkillId: newSkillId, project: null, projectId: null, questionAnswers: {}, draft: '' });
     }
@@ -341,59 +447,176 @@ export const useStudio = create<StudioState>((set, get) => ({
   setAnswer: (key, value) => set((s) => ({ questionAnswers: { ...s.questionAnswers, [key]: value } })),
   resetAnswers: () => set({ questionAnswers: {} }),
 
-  startStreaming: () => set({ isStreaming: true, pendingAssistant: '', streamStatus: 'streaming', retryNote: undefined }),
-  markStalled: (sinceMs) => set({ streamStatus: 'stalled', retryNote: `No reply for ${Math.round(sinceMs / 1000)}s` }),
-  markRetry: (attempt, waitMs, reason) => set({
-    streamStatus: 'retrying',
-    retryNote: `Retry ${attempt}/2 in ${(waitMs / 1000).toFixed(1)}s · ${reason.slice(0, 80)}`,
-  }),
+  bindConversation: (conversationId) => {
+    const st = get();
+    const skillId = st.streamingSkillId ?? st.selectedSkillId;
+    if (!st.project || !skillId) return;
+    let project = patchSkillSession(st.project, skillId, { conversationId });
+    if (skillId !== st.selectedSkillId) project = applySession(project, st.selectedSkillId);
+    void window.renoir.saveProject(project);
+    set({ project, activeConversationId: conversationId });
+  },
+
+  startStreaming: () => {
+    const st = get();
+    const skillId = st.selectedSkillId;
+    if (!skillId) {
+      set({ isStreaming: true, pendingAssistant: '', streamStatus: 'streaming', retryNote: undefined });
+      return;
+    }
+    let project = st.project
+      ? patchSkillSession(st.project, skillId, {
+        pendingAssistant: '',
+        isStreaming: true,
+        streamStatus: 'streaming',
+        retryNote: undefined,
+      })
+      : st.project;
+    set({
+      isStreaming: true,
+      streamingSkillId: skillId,
+      pendingAssistant: '',
+      streamStatus: 'streaming',
+      retryNote: undefined,
+      project,
+    });
+  },
+  markStalled: (sinceMs) => {
+    const st = get();
+    const skillId = st.streamingSkillId;
+    const retryNote = `No reply for ${Math.round(sinceMs / 1000)}s`;
+    if (!skillId || !st.project) {
+      set({ streamStatus: 'stalled', retryNote });
+      return;
+    }
+    const project = patchSkillSession(st.project, skillId, { streamStatus: 'stalled', retryNote });
+    const patch: Partial<StudioState> = { project };
+    if (skillId === st.selectedSkillId) patch.streamStatus = 'stalled';
+    patch.retryNote = retryNote;
+    set(patch);
+  },
+  markRetry: (attempt, waitMs, reason) => {
+    const st = get();
+    const skillId = st.streamingSkillId;
+    const retryNote = `Retry ${attempt}/2 in ${(waitMs / 1000).toFixed(1)}s · ${reason}`;
+    if (!skillId || !st.project) {
+      set({ streamStatus: 'retrying', retryNote });
+      return;
+    }
+    const project = patchSkillSession(st.project, skillId, { streamStatus: 'retrying', retryNote });
+    const patch: Partial<StudioState> = { project };
+    if (skillId === st.selectedSkillId) patch.streamStatus = 'retrying';
+    patch.retryNote = retryNote;
+    set(patch);
+  },
   appendAssistantDelta: (s) => {
-    set((st) => ({ pendingAssistant: st.pendingAssistant + s }));
-    // Throttled persistence — save in-progress text to disk every ~1s so a
-    // crash or navigation does not lose the pending stream.
+    const st = get();
+    const skillId = st.streamingSkillId;
+    if (!skillId || !st.project) return;
+
+    const session = getSkillSession(st.project, skillId);
+    const pending = (session.pendingAssistant ?? '') + s;
+    let project = patchSkillSession(st.project, skillId, { pendingAssistant: pending });
+
+    const patch: Partial<StudioState> = { project };
+    if (skillId === st.selectedSkillId) patch.pendingAssistant = pending;
+    set(patch);
+
     queueMicrotask(() => {
-      const st = useStudio.getState();
-      if (!st.isStreaming || !st.project) return;
+      const cur = useStudio.getState();
+      if (!cur.project || cur.streamingSkillId !== skillId) return;
       const now = Date.now();
-      const last = (st as any).__lastPersist || 0;
+      const last = (cur as StudioState & { __lastPersist?: number }).__lastPersist || 0;
       if (now - last < 1000) return;
-      (st as any).__lastPersist = now;
-      const conv = st.project.conversation.slice();
-      const tail = conv[conv.length - 1];
-      const draftMsg = { role: 'assistant' as const, content: st.pendingAssistant, ts: new Date().toISOString(), inProgress: true };
-      if (tail && (tail as any).inProgress) conv[conv.length - 1] = draftMsg;
-      else conv.push(draftMsg);
-      const next = { ...st.project, conversation: conv };
-      void window.renoir.saveProject(next as any);
+      (cur as StudioState & { __lastPersist?: number }).__lastPersist = now;
+
+      const sess = getSkillSession(cur.project, skillId);
+      const base = conversationForSkill(cur.project, skillId, cur.selectedSkillId);
+      const conv = withInProgressAssistant(base, sess.pendingAssistant ?? '');
+      let saved = patchSkillSession(cur.project, skillId, { conversation: conv });
+      if (skillId !== cur.selectedSkillId) saved = applySession(saved, cur.selectedSkillId);
+      void window.renoir.saveProject(saved);
     });
   },
   finishStreaming: async () => {
     const st = get();
-    if (!st.project) { set({ isStreaming: false, pendingAssistant: '' }); return; }
-    // Replace any in-progress draft message with the final assistant message.
-    const conv = st.project.conversation.slice();
+    const skillId = st.streamingSkillId ?? st.selectedSkillId;
+    const viewingSkillId = st.selectedSkillId;
+    if (!st.project || !skillId) {
+      set({ isStreaming: false, pendingAssistant: '', streamStatus: 'idle', retryNote: undefined, streamingSkillId: undefined, activeConversationId: undefined });
+      return;
+    }
+
+    const sess = getSkillSession(st.project, skillId);
+    const pending = sess.pendingAssistant ?? st.pendingAssistant;
+    const conv = conversationForSkill(st.project, skillId, viewingSkillId).slice();
     const tail = conv[conv.length - 1];
     const finalMsg: ProjectMessage = {
       role: 'assistant',
-      content: st.pendingAssistant,
+      content: pending,
       ts: new Date().toISOString(),
     };
-    if (tail && (tail as any).inProgress) conv[conv.length - 1] = finalMsg;
+    if (tail && (tail as ProjectMessage & { inProgress?: boolean }).inProgress) conv[conv.length - 1] = finalMsg;
     else conv.push(finalMsg);
-    let next: ProjectRecord = syncActiveSession({ ...st.project, conversation: conv }, st.selectedSkillId ?? st.project.skillId ?? 'web-prototype');
 
-    // Snapshot artifact if the assistant emitted one (only the closed form
-    // is committed as a version — partials become versions on next assistant
-    // turn that closes them).
+    let project = patchSkillSession(st.project, skillId, {
+      conversation: conv,
+      pendingAssistant: '',
+      isStreaming: false,
+      streamStatus: 'idle',
+      retryNote: undefined,
+      conversationId: undefined,
+    });
+
     const m = finalMsg.content.match(/<artifact>([\s\S]*?)<\/artifact>/i);
     if (m) {
       const html = m[1].trim();
-      const verRes = await window.renoir.addVersion({ id: next.id, html, source: 'assistant' });
-      if (verRes.ok && verRes.project) next = verRes.project;
+      const forSave = applySession(syncActiveSession({
+        ...project,
+        conversation: conv,
+        versions: getSkillSession(project, skillId).versions,
+      }, skillId), skillId);
+      await window.renoir.saveProject(forSave);
+      const verRes = await window.renoir.addVersion({ id: forSave.id, html, source: 'assistant', skillId });
+      if (verRes.ok && verRes.project) {
+        project = syncActiveSession(verRes.project, skillId);
+        project = patchSkillSession(project, skillId, {
+          conversation: conv,
+          pendingAssistant: '',
+          isStreaming: false,
+          streamStatus: 'idle',
+          retryNote: undefined,
+          conversationId: undefined,
+          versions: getSkillSession(project, skillId).versions,
+          previewHtml: html,
+        });
+      }
     } else {
-      await window.renoir.saveProject(next);
+      const forSave = skillId === viewingSkillId
+        ? syncActiveSession({ ...project, conversation: conv }, skillId)
+        : applySession(syncActiveSession(patchSkillSession(project, skillId, { conversation: conv }), skillId), viewingSkillId);
+      await window.renoir.saveProject(forSave);
+      project = forSave;
     }
-    set({ project: next, isStreaming: false, pendingAssistant: '', streamStatus: 'idle', retryNote: undefined });
+
+    if (skillId !== viewingSkillId) project = applySession(project, viewingSkillId);
+
+    const stillStreaming = Object.values(project.skillSessions ?? {}).some((s) => s.isStreaming);
+    const nextStreamingSkill = stillStreaming
+      ? Object.entries(project.skillSessions ?? {}).find(([, s]) => s.isStreaming)?.[0]
+      : undefined;
+
+    set({
+      project,
+      isStreaming: false,
+      pendingAssistant: '',
+      streamStatus: 'idle',
+      retryNote: undefined,
+      streamingSkillId: nextStreamingSkill,
+      activeConversationId: nextStreamingSkill
+        ? getSkillSession(project, nextStreamingSkill).conversationId
+        : undefined,
+    });
   },
   appendUser: async (content, attachments) => {
     const st = get();
@@ -404,15 +627,51 @@ export const useStudio = create<StudioState>((set, get) => ({
       ts: new Date().toISOString(),
       ...(attachments?.length ? { attachments } : {}),
     };
-    const skillId = st.selectedSkillId ?? st.project.skillId ?? 'web-prototype';
-    const next: ProjectRecord = syncActiveSession({
+    let next: ProjectRecord = {
       ...st.project,
-      skillId,
+      skillId: st.selectedSkillId ?? st.project.skillId,
       designSystemId: st.selectedDesignSystemId ?? st.project.designSystemId,
       agentId: st.selectedAgentId ?? st.project.agentId,
       conversation: [...st.project.conversation, msg],
-    }, skillId);
+    };
+    next = syncActiveSession(next, st.selectedSkillId ?? next.skillId);
     await window.renoir.saveProject(next);
     set({ project: next, draft: '' });
+    saveWorkspaceSnapshot({ projectId: next.id, skillId: st.selectedSkillId ?? next.skillId });
+  },
+
+  flushProject: async () => {
+    const st = get();
+    if (!st.project) return;
+    const skillId = st.selectedSkillId ?? st.project.skillId;
+    const activeStream =
+      st.streamingSkillId === skillId
+        ? {
+            pendingAssistant: st.pendingAssistant,
+            isStreaming: st.isStreaming,
+            streamStatus: st.streamStatus,
+            retryNote: st.retryNote,
+            conversationId: st.activeConversationId,
+          }
+        : undefined;
+    let project = syncActiveSession(st.project, skillId, activeStream);
+    if (st.streamingSkillId && st.streamingSkillId !== skillId) {
+      const bg = getSkillSession(project, st.streamingSkillId);
+      project = patchSkillSession(project, st.streamingSkillId, {
+        pendingAssistant: bg.pendingAssistant,
+        isStreaming: bg.isStreaming,
+        streamStatus: bg.streamStatus,
+        retryNote: bg.retryNote,
+        conversationId: bg.conversationId,
+      });
+    }
+    project = { ...project, skillId: skillId ?? project.skillId };
+    await window.renoir.saveProject(project);
+    set({ project });
+    saveWorkspaceSnapshot({
+      projectId: project.id,
+      skillId: skillId ?? project.skillId,
+      route: useUI.getState().route,
+    });
   },
 }));

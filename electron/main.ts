@@ -80,8 +80,10 @@ import { exportArtifactToPptx } from './pptx.js';
 import { listProjectAssets } from './assets.js';
 
 let mainWindow: BrowserWindow | null = null;
+let closeConfirmed = false;
 
 function createWindow(): void {
+  closeConfirmed = false;
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -124,9 +126,21 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
+
+  mainWindow.on('close', (e) => {
+    if (closeConfirmed) return;
+    e.preventDefault();
+    mainWindow?.webContents.send('renoir:app:flush');
+  });
 }
 
 function registerIpc(): void {
+  ipcMain.handle('renoir:app:flush-done', () => {
+    closeConfirmed = true;
+    mainWindow?.close();
+    return { ok: true };
+  });
+
   // BYOK
   ipcMain.handle('renoir:byok:get', async () => {
     const cfg = store.getByok();
@@ -156,9 +170,11 @@ function registerIpc(): void {
     const c = azureConfig();
     return {
       configured: azureConfigured(),
+      imageConfigured: azureImageConfigured(),
       imageDeployment: c.imageModel,
       textDeployment: c.textModel,
       endpoint: c.endpoint,
+      imageEndpoint: c.imageEndpoint,
       audioDeployment: process.env.AZURE_AUDIO_DEPLOYMENT || '',
       videoDeployment: process.env.AZURE_VIDEO_DEPLOYMENT || '',
     };
@@ -194,7 +210,7 @@ function registerIpc(): void {
   ipcMain.handle('renoir:design:list', () => {
     const builtIn = listDesignSystems();
     const custom = customCatalog.listSystems().map((d) => ({
-      id: d.id, name: d.name, vibe: d.vibe, swatches: d.swatches, font: d.font,
+      id: d.id, name: d.name, vibe: d.vibe, swatches: d.swatches, font: d.font, tokens: d.tokens,
     }));
     return [...builtIn, ...custom];
   });
@@ -338,7 +354,7 @@ function registerIpc(): void {
   });
 
   // Version snapshots
-  ipcMain.handle('renoir:projects:addVersion', (_e, req: { id: string; html: string; source?: 'assistant' | 'fork' | 'restore'; note?: string }) => {
+  ipcMain.handle('renoir:projects:addVersion', (_e, req: { id: string; html: string; source?: 'assistant' | 'fork' | 'restore'; note?: string; skillId?: string }) => {
     const rec = store.getProject(req.id);
     if (!rec) return { ok: false, error: 'project not found' };
     if (!rec.versions) rec.versions = [];
@@ -353,6 +369,17 @@ function registerIpc(): void {
     });
     // A new assistant version overrides any restore selection.
     if (req.source !== 'restore') rec.activeVersionId = undefined;
+    const skillKey = req.skillId ?? rec.skillId;
+    if (skillKey) {
+      if (!rec.skillSessions) rec.skillSessions = {};
+      rec.skillSessions[skillKey] = {
+        ...rec.skillSessions[skillKey],
+        conversation: rec.conversation,
+        versions: rec.versions,
+        activeVersionId: rec.activeVersionId,
+        previewHtml: req.html,
+      };
+    }
     rec.updatedAt = new Date().toISOString();
     store.upsertProject(rec);
     return { ok: true, project: rec };

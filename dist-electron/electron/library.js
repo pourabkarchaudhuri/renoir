@@ -99,7 +99,7 @@ const skills = [
     {
         id: 'product-deck', name: 'Product Deck', category: 'deck', emoji: '📽️',
         blurb: '12-slide product walkthrough.',
-        primer: 'Cover, why-now, current pain, product map, 4 feature slides, integrations, security, pricing, contact. Display typography for slide titles. Gradient orbs on cover slide. Entrance animation on content blocks (staggered fade-in). Elevation-1 on feature cards within slides. Realistic product names and metrics. Dark/light theme tokens.',
+        primer: '12 slides: cover, why-now, pain, product map, 4 features, integrations, security, pricing, contact. Rich copy — 2+ sentence lede and 3 bullets or 3 cards per slide. Cover, map, and feature slides need empty <img src="" alt="…" class="slide-image"> in .slide-visual (auto-filled). Display typography, gradient orbs on cover, staggered entrance animation, elevation-1 cards. Realistic product names and metrics. Dark/light theme tokens.',
         questions: Q_BASE,
     },
     {
@@ -736,7 +736,7 @@ export function getSkill(id) {
 }
 export function listDesignSystems() {
     return systems.map((d) => ({
-        id: d.id, name: d.name, vibe: d.vibe, swatches: d.swatches, font: d.font,
+        id: d.id, name: d.name, vibe: d.vibe, swatches: d.swatches, font: d.font, tokens: d.tokens,
     }));
 }
 export function getDesignSystem(id) {

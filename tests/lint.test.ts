@@ -16,6 +16,19 @@ describe('lintArtifact', () => {
     expect(r.score).toBeGreaterThanOrEqual(80);
   });
 
+  it('accepts h2–h6 as document heading', () => {
+    const html = `<!doctype html><html><head><title>Deck</title><meta name="viewport" content="width=device-width"></head>
+      <body><section><h2>Slide title</h2></section></body></html>`;
+    const r = lintArtifact(html);
+    expect(r.findings.some((f) => f.rule === 'heading')).toBe(false);
+  });
+
+  it('skips decorative images without alt', () => {
+    const html = `<!doctype html><html><head><title>x</title></head><body><h1>x</h1><img src="a.png" aria-hidden="true"></body></html>`;
+    const r = lintArtifact(html);
+    expect(r.findings.some((f) => f.rule === 'img-alt')).toBe(false);
+  });
+
   it('warns on imgs without alt', () => {
     const html = `<!doctype html><html><head><title>Hi</title></head><body><h1>x</h1><img src="a.png"><img src="b.png"></body></html>`;
     const r = lintArtifact(html);
@@ -26,6 +39,50 @@ describe('lintArtifact', () => {
     const html = `<!doctype html><html><head><title>x</title></head><body><h1>x</h1><a href="/">click here</a></body></html>`;
     const r = lintArtifact(html);
     expect(r.findings.some((f) => f.rule === 'link-text')).toBe(true);
+  });
+
+  it('warns when dashboard regions are missing', () => {
+    const html = `<!doctype html><html><head><meta name="renoir:dashboard" content="1"><title>Dash</title></head>
+      <body><main><header data-od-id="topbar"></header></main></body></html>`;
+    const r = lintArtifact(html);
+    expect(r.findings.some((f) => f.rule === 'dashboard-regions')).toBe(true);
+  });
+
+  it('passes lint when dashboard uses alias region ids', () => {
+    const html = `<!doctype html><html><head><meta name="renoir:dashboard" content="1"><title>Dash</title></head>
+      <body>
+        <header data-od-id="topbar"></header>
+        <main>
+          <section data-od-id="kpis"></section>
+          <section data-od-id="chart-panel"></section>
+          <section data-od-id="recent-events"></section>
+        </main>
+      </body></html>`;
+    const r = lintArtifact(html);
+    expect(r.findings.some((f) => f.rule === 'dashboard-regions')).toBe(false);
+  });
+
+  it('warns on 100vw in dashboard artifacts', () => {
+    const html = `<!doctype html><html><head><meta name="renoir:dashboard" content="1"><title>Dash</title></head>
+      <body><main style="width:100vw" data-od-id="kpis"></main></body></html>`;
+    const r = lintArtifact(html);
+    expect(r.findings.some((f) => f.rule === 'dashboard-vw')).toBe(true);
+  });
+
+  it('warns when dashboard widgets use nested scroll', () => {
+    const html = `<!doctype html><html><head><meta name="renoir:dashboard" content="1"><title>Dash</title></head>
+      <body><style>.chart { overflow: auto; }</style><section data-od-id="primary-chart"></section></body></html>`;
+    const r = lintArtifact(html);
+    expect(r.findings.some((f) => f.rule === 'dashboard-nested-scroll')).toBe(true);
+  });
+
+  it('warns when dashboard line chart distorts data', () => {
+    const html = `<!doctype html><html><head><meta name="renoir:dashboard" content="1"><title>Dash</title></head>
+      <body><section data-od-id="primary-chart">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none"><polyline points="0,90 50,50 100,10"/></svg>
+      </section></body></html>`;
+    const r = lintArtifact(html);
+    expect(r.findings.some((f) => f.rule === 'dashboard-chart-distorted')).toBe(true);
   });
 });
 

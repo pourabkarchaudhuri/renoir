@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import {
   composeSystemPrompt, extractArtifact, extractQuestionForm,
-  stripArtifact, inferPhase, usesDirectArtifactGeneration,
+  stripArtifact, inferPhase, hasLockedBrief, extractBriefFromConversation,
 } from '../src/lib/prompt';
 import { listSkills, getSkill } from '../electron/library';
 
@@ -22,6 +22,16 @@ describe('prompt composer', () => {
     expect(r.system).toContain('Output one HTML.');
   });
 
+  it('injects product deck requirements when skill is product-deck', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'product-deck', name: 'Product Deck', category: 'deck', emoji: '📽️', blurb: '12-slide walkthrough.' },
+      primer: 'Cover through contact.',
+    });
+    expect(r.system).toContain('# Product Deck requirements');
+    expect(r.system).toContain('slide-visual');
+    expect(r.system).toContain('12 slides');
+  });
+
   it('injects design system tokens', () => {
     const r = composeSystemPrompt({
       designSystem: { id: 'ember', name: 'Ember', vibe: 'Warm', swatches: [], font: 'Inter' },
@@ -29,33 +39,6 @@ describe('prompt composer', () => {
     });
     expect(r.system).toContain('# Active design system: Ember');
     expect(r.system).toContain('--bg: oklch(0.18 0.02 264);');
-  });
-
-  it('adds web quality bar for web skills', () => {
-    const r = composeSystemPrompt({
-      skill: { id: 'web-prototype', name: 'Web Prototype', category: 'web', emoji: '🌐', blurb: 'Site.' },
-    });
-    expect(r.system).toContain('Web prototype quality bar');
-    expect(r.system).toContain('Do NOT use Tailwind CDN');
-    expect(r.system).toContain('Never emit <question-form>');
-  });
-
-  it('adds pricing quality bar for pricing-page skill', () => {
-    const r = composeSystemPrompt({
-      skill: { id: 'pricing-page', name: 'Pricing Page', category: 'web', emoji: '💵', blurb: 'Plans.' },
-    });
-    expect(r.system).toContain('Pricing page quality bar');
-    expect(r.system).toContain('Never emit <question-form>');
-    expect(r.system).toContain('Free');
-    expect(r.system).toContain('Standard');
-    expect(r.system).toContain('Premium');
-    expect(r.system).not.toContain('Required sections (minimum 6');
-  });
-
-  it('flags direct-generate skills', () => {
-    expect(usesDirectArtifactGeneration({ id: 'pricing-page' })).toBe(true);
-    expect(usesDirectArtifactGeneration({ id: 'web-prototype' })).toBe(true);
-    expect(usesDirectArtifactGeneration({ id: 'docs-portal' })).toBe(false);
   });
 
   it('includes brand spec when provided', () => {
@@ -135,12 +118,8 @@ describe('inferPhase', () => {
     expect(inferPhase('<artifact>... lots ...<footer>©', 100)).toBe('Closing the footer…');
   });
 
-  it('detects pricing plan card phase', () => {
-    expect(inferPhase('<artifact><section class="plan-card">', 100)).toBe('Building plan cards…');
-  });
-
-  it('detects FAQ phase', () => {
-    expect(inferPhase('<artifact><details><summary>', 100)).toBe('Writing FAQ…');
+  it('detects token tuning phase', () => {
+    expect(inferPhase('<artifact><style>:root { --bg: black; }', 100)).toBe('Tuning tokens…');
   });
 });
 
@@ -158,6 +137,39 @@ field:goal | label:Goal | type:textarea
   });
   it('returns null when none', () => {
     expect(extractQuestionForm('blah')).toBeNull();
+  });
+});
+
+describe('brief lock', () => {
+  it('detects locked brief from user message', () => {
+    const conv = [
+      { role: 'user', content: 'Build a dashboard' },
+      { role: 'assistant', content: '<question-form>field:audience | label:Who</question-form>' },
+      { role: 'user', content: 'Brief:\n- Tone: minimal\n- Who is this for?: ops leads' },
+    ];
+    expect(hasLockedBrief(conv)).toBe(true);
+    expect(extractBriefFromConversation(conv)).toMatchObject({
+      locked: 'yes',
+      tone: 'minimal',
+      audience: 'ops leads',
+    });
+  });
+
+  it('does not treat ordinary messages as locked brief', () => {
+    const conv = [
+      { role: 'user', content: 'Build a dashboard for ops leads' },
+      { role: 'assistant', content: '<question-form>field:audience</question-form>' },
+    ];
+    expect(hasLockedBrief(conv)).toBe(false);
+  });
+
+  it('includes locked brief answers in system prompt', () => {
+    const r = composeSystemPrompt({
+      answers: { locked: 'yes', audience: 'ops', tone: 'minimal', scope: 'KPIs + charts' },
+    });
+    expect(r.system).toContain('do NOT re-ask');
+    expect(r.system).toContain('Never emit <question-form>');
+    expect(r.system).toContain('- audience: ops');
   });
 });
 
@@ -316,10 +328,11 @@ describe('composeSystemPrompt signature stability', () => {
     const expectedExports = [
       'composeSystemPrompt',
       'extractArtifact',
+      'extractBriefFromConversation',
       'extractQuestionForm',
+      'hasLockedBrief',
       'inferPhase',
       'stripArtifact',
-      'usesDirectArtifactGeneration',
     ].sort();
     expect(exportedKeys).toEqual(expectedExports);
   });

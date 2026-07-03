@@ -1,20 +1,73 @@
 // Preview-mode selection. Auto-detects the right viewer for the active skill
 // and exposes a small registry the renderer can iterate.
 
+import { MOBILE_SIDEBAR_BRIDGE_FN } from './preview-mobile-sidebar';
+import { DASHBOARD_BRIDGE_FN } from '@shared/dashboard-layout';
+import { DECK_CONTRAST_BRIDGE_FN, countDeckSlides } from './preview-deck-contrast';
+
+export { countDeckSlides };
+
 export type PreviewMode = 'scroll' | 'present';
 
 /** CDN URL for the Mermaid library injected into artifact iframes. */
 export const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
 
 /** Initialization script that configures and runs Mermaid in the artifact iframe. */
-export const MERMAID_INIT_SCRIPT = `<script src="${MERMAID_CDN}"></script>
-<script>
-document.addEventListener('DOMContentLoaded', function() {
-  if (typeof mermaid !== 'undefined') {
-    mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' });
-    mermaid.run({ querySelector: '.mermaid' });
+export const MERMAID_INIT_SCRIPT = `<script>
+(function () {
+  var mermaidReady = null;
+  function ensureMermaid() {
+    if (typeof mermaid !== 'undefined') return Promise.resolve(mermaid);
+    if (mermaidReady) return mermaidReady;
+    mermaidReady = new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = '${MERMAID_CDN}';
+      s.onload = function () { resolve(window.mermaid); };
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+    return mermaidReady;
   }
-});
+  function hydrateMermaidPlaceholders() {
+    document.querySelectorAll('.mermaid-placeholder[data-mermaid-src]').forEach(function (el) {
+      try {
+        var src = atob(el.getAttribute('data-mermaid-src') || '');
+        var pre = document.createElement('pre');
+        pre.className = 'mermaid';
+        pre.setAttribute('data-renoir-mermaid-src', src);
+        pre.textContent = src;
+        el.replaceWith(pre);
+      } catch (e) { /* swallow */ }
+    });
+  }
+  function getMermaidSource(el) {
+    var src = el.getAttribute('data-renoir-mermaid-src');
+    if (!src) {
+      src = (el.textContent || '').trim();
+      if (src) el.setAttribute('data-renoir-mermaid-src', src);
+    }
+    return src || '';
+  }
+  window.__renoirRunMermaid = function () {
+    return ensureMermaid().then(function (mm) {
+      hydrateMermaidPlaceholders();
+      mm.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' });
+      var nodes = Array.prototype.slice.call(document.querySelectorAll('.mermaid'));
+      if (!nodes.length) return;
+      return Promise.all(nodes.map(function (el, i) {
+        var src = getMermaidSource(el);
+        if (!src) return Promise.resolve();
+        var id = 'renoir-m-' + i + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+        return mm.render(id, src).then(function (out) {
+          el.innerHTML = out.svg;
+          el.setAttribute('data-renoir-mermaid-src', src);
+        }).catch(function () {
+          el.textContent = src;
+        });
+      }));
+    });
+  };
+})();
 </script>`;
 
 const SKILL_TO_MODE: Record<string, PreviewMode> = {
@@ -34,43 +87,70 @@ export function defaultModeForSkill(skillId?: string): PreviewMode {
  * Bridge script injected into the artifact iframe. Listens for nav messages
  * from the parent, reports slide count + active index, and applies the right
  * layout per mode:
- *   • present — slides laid out horizontally, navigated by translateX
- *   • pages   — slides stacked vertically, page-break aware
+ *   • present — one slide visible at a time; inactive slides hidden
  *   • scroll  — user content untouched
- *
- * For present mode we position each slide absolutely (left: i*100vw) so
- * nesting in the source doc is irrelevant — the bridge owns the geometry.
  */
-export const NAV_BRIDGE = `<!--renoir-nav-bridge-->
+export const NAV_BRIDGE = `
 <script>
 (function () {
+${MOBILE_SIDEBAR_BRIDGE_FN}
+${DASHBOARD_BRIDGE_FN}
+${DECK_CONTRAST_BRIDGE_FN}
   var STYLE_ID = '__renoir_mode_style';
-  var POLISH_ID = '__renoir_preview_polish';
-  function ensurePreviewPolish() {
-    if (document.getElementById(POLISH_ID)) return;
-    var st = document.createElement('style');
-    st.id = POLISH_ID;
-    st.textContent =
-      'html,body{min-height:100%;}' +
-      'html:has(body[data-renoir-mode="scroll"]){height:100%!important;overflow-x:hidden!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch;}' +
-      'body[data-renoir-mode="scroll"]{height:auto!important;min-height:100%!important;overflow:visible!important;}' +
-      'header,header>*,.site-header,nav.topnav,.topnav{max-width:100%;box-sizing:border-box;}' +
-      'header nav,nav.topnav,.topnav,header .nav,nav.site-nav{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:0.4rem 0.65rem;min-width:0;flex:1 1 auto;}' +
-      'header .brand,header .logo,header>a:first-child{flex-shrink:0;min-width:0;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
-      'header .btn,nav .btn,header button,nav button,.cta,.btn-primary{box-sizing:border-box;white-space:nowrap;flex-shrink:1;min-width:0;max-width:9.5rem;overflow:hidden;text-overflow:ellipsis;font-size:clamp(11px,2.4vw,14px);padding:0.45rem 0.75rem;}' +
-      '@media(max-width:640px){header nav a,nav.topnav a{font-size:11px;padding:2px 4px;}header .btn,nav .btn,header button,.cta{max-width:7.5rem;font-size:11px;padding:0.4rem 0.55rem;}}';
-    document.head.appendChild(st);
+  var SCROLL_STYLE_ID = '__renoir_scroll_style';
+  var SLIDE_CLASS = 'renoir-slide';
+  function isSlideEl(el) {
+    if (!el || el.nodeType !== 1) return false;
+    var tag = el.tagName;
+    if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT' || tag === 'LINK' || tag === 'META') return false;
+    if (el.hasAttribute('data-slide')) return true;
+    if (el.classList && el.classList.contains('slide')) return true;
+    var parent = el.parentElement;
+    if (tag === 'SECTION' && parent && (parent.classList.contains('deck') || parent.id === 'deck')) return true;
+    return false;
   }
   function slides() {
-    var main = document.querySelector('main');
-    if (main) {
-      var direct = main.querySelectorAll(':scope > section, :scope > [data-slide]');
-      if (direct.length) return Array.from(direct);
+    var dataSlides = document.querySelectorAll('[data-slide]');
+    if (dataSlides.length) return Array.from(dataSlides);
+    var deck = document.querySelector('.deck') || document.getElementById('deck');
+    if (deck) {
+      var deckSlides = Array.from(deck.children).filter(isSlideEl);
+      if (deckSlides.length) return deckSlides;
     }
-    var top = document.body.querySelectorAll(':scope > section, :scope > [data-slide]');
-    if (top.length) return Array.from(top);
-    var all = document.querySelectorAll('section, [data-slide]');
-    return all.length ? Array.from(all) : [document.body];
+    var byClass = document.querySelectorAll('section.slide, div.slide, article.slide');
+    if (byClass.length) return Array.from(byClass);
+    var allSections = document.querySelectorAll('section');
+    if (allSections.length > 1) return Array.from(allSections);
+    return [document.body];
+  }
+  function resetScroller() {
+    try {
+      document.body.scrollLeft = 0;
+      document.body.scrollTop = 0;
+      document.documentElement.scrollLeft = 0;
+      document.documentElement.scrollTop = 0;
+    } catch (e) { /* swallow */ }
+  }
+  function neutralizeDeckTrack() {
+    ['.deck', '#deck'].forEach(function (sel) {
+      var el = document.querySelector(sel);
+      if (!el) return;
+      el.style.transform = 'none';
+      el.style.transition = 'none';
+      el.style.display = 'block';
+      el.style.width = '100%';
+      el.style.height = '100%';
+      el.style.overflow = 'hidden';
+      el.style.flexWrap = 'nowrap';
+      el.scrollLeft = 0;
+    });
+    document.body.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    document.body.style.overflowX = 'hidden';
+    document.body.style.overflowY = 'hidden';
+    document.body.style.transform = 'none';
+    document.body.style.scrollSnapType = 'none';
+    resetScroller();
   }
   function ensureStyle() {
     var st = document.getElementById(STYLE_ID);
@@ -82,397 +162,262 @@ export const NAV_BRIDGE = `<!--renoir-nav-bridge-->
     return st;
   }
   function clearInline(el) {
-    var props = ['position','top','left','right','bottom','width','height','minHeight','maxHeight',
-      'transform','transition','overflow','boxSizing','willChange','zIndex','paddingTop','display'];
-    props.forEach(function (p) { el.style[p] = ''; });
-    delete el.dataset.renoirOwned;
-    el.removeAttribute('data-renoir-active');
-  }
-  function clearChrome() {
-    document.querySelectorAll('[data-renoir-chrome]').forEach(function (el) {
-      el.style.display = '';
-      delete el.dataset.renoirChrome;
-    });
-  }
-  function applyChrome(idx, list) {
-    clearChrome();
-    document.querySelectorAll('footer, [role="contentinfo"]').forEach(function (el) {
-      if (list.indexOf(el) >= 0) return;
-      var show = idx === list.length - 1;
-      el.dataset.renoirChrome = '1';
-      el.style.display = show ? '' : 'none';
-      if (show) el.dataset.renoirFooterFixed = '1';
-      else delete el.dataset.renoirFooterFixed;
-    });
-  }
-  function measureChrome() {
-    if (document.body.getAttribute('data-renoir-mode') !== 'present') return;
-    var top = 72;
-    var header = document.querySelector(
-      'body[data-renoir-mode="present"] > header,' +
-      'body[data-renoir-mode="present"] > nav,' +
-      'body[data-renoir-mode="present"] header.site-header,' +
-      'body[data-renoir-mode="present"] nav.topnav'
-    );
-    if (header) {
-      var hr = header.getBoundingClientRect();
-      if (hr.height > 0) top = Math.ceil(hr.height) + 8;
+    if (el.dataset.renoirOwned) {
+      el.classList.remove(SLIDE_CLASS);
+      el.classList.remove('is-active');
+      el.style.position = '';
+      el.style.top = '';
+      el.style.left = '';
+      el.style.right = '';
+      el.style.bottom = '';
+      el.style.width = '';
+      el.style.height = '';
+      el.style.transform = '';
+      el.style.transition = '';
+      el.style.overflow = '';
+      el.style.boxSizing = '';
+      el.style.willChange = '';
+      el.removeAttribute('hidden');
+      delete el.dataset.renoirOwned;
     }
-    var bottom = 0;
-    document.querySelectorAll('footer[data-renoir-footer-fixed], [role="contentinfo"][data-renoir-footer-fixed]').forEach(function (el) {
-      if (el.style.display === 'none') return;
-      var fr = el.getBoundingClientRect();
-      if (fr.height > 0) bottom = Math.max(bottom, Math.ceil(fr.height) + 8);
-    });
-    document.documentElement.style.setProperty('--renoir-chrome-top', top + 'px');
-    document.documentElement.style.setProperty('--renoir-chrome-bottom', bottom + 'px');
   }
-  function unwrapFitRoots() {
-    document.querySelectorAll('[data-renoir-fit-root]').forEach(function (root) {
-      var parent = root.parentNode;
-      if (!parent) return;
-      while (root.firstChild) parent.insertBefore(root.firstChild, root);
-      parent.removeChild(root);
-    });
-  }
-  function ensureFitRoot(slide) {
-    if (slide === document.body) return slide;
-    var existing = slide.querySelector(':scope > [data-renoir-fit-root]');
-    if (existing) return existing;
-    var root = document.createElement('div');
-    root.setAttribute('data-renoir-fit-root', '1');
-    while (slide.firstChild) root.appendChild(slide.firstChild);
-    slide.appendChild(root);
-    return root;
-  }
-  function resetFitRoot(root) {
-    if (!root) return;
-    root.style.transform = '';
-    root.style.transformOrigin = '';
-    root.style.zoom = '';
-    root.style.width = '';
-    root.style.maxWidth = '';
-    root.style.maxHeight = '';
-    root.style.height = '';
-    root.style.marginBottom = '';
-    root.style.marginLeft = '';
-    root.style.marginRight = '';
-    root.style.overflow = '';
-  }
-  function slideContentBox() {
-    var top = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--renoir-chrome-top')) || 0;
-    var bottom = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--renoir-chrome-bottom')) || 0;
-    var h = (window.innerHeight || document.documentElement.clientHeight || 800) - top - bottom;
-    var w = window.innerWidth || document.documentElement.clientWidth || 390;
-    return { w: Math.max(1, w), h: Math.max(1, h) };
-  }
-  function fitSlide(slide) {
-    if (!slide || slide === document.body) return;
-    var box = slideContentBox();
-    var root = ensureFitRoot(slide);
-    resetFitRoot(root);
-    root.style.boxSizing = 'border-box';
-    root.style.width = '100%';
-    root.style.maxWidth = '100%';
-    var naturalH = root.scrollHeight || root.offsetHeight || 0;
-    var naturalW = root.scrollWidth || root.offsetWidth || box.w;
-    if (naturalH < 1) return;
-    var scale = Math.min(1, box.h / naturalH, box.w / Math.max(naturalW, 1));
-    scale = Math.floor(scale * 1000) / 1000;
-    if (scale >= 0.995) return;
-    root.style.zoom = String(scale);
-    root.style.width = '100%';
-    root.style.maxWidth = '100%';
-  }
-  function fitActiveSlide() {
-    if (document.body.getAttribute('data-renoir-mode') !== 'present') return;
-    measureChrome();
-    slides().forEach(function (slide) {
-      if (slide === document.body) return;
-      var root = slide.querySelector(':scope > [data-renoir-fit-root]');
-      if (root) resetFitRoot(root);
-    });
-    var active = document.querySelector('section[data-renoir-active], [data-slide][data-renoir-active]');
-    if (active && active !== document.body) fitSlide(active);
-  }
-  function scheduleFit() {
-    fitActiveSlide();
-    setTimeout(fitActiveSlide, 0);
-    setTimeout(fitActiveSlide, 80);
-    setTimeout(fitActiveSlide, 200);
-    setTimeout(fitActiveSlide, 500);
-    setTimeout(fitActiveSlide, 1200);
-  }
-  function applyHorizontal(idx) {
-    removeScrollTail();
-    var list = slides();
-    var st = ensureStyle();
-    st.textContent =
-      'html,body{margin:0;padding:0;overflow:hidden;height:100%;width:100%;}' +
-      '[data-nav],[class*="nav-btn"],[class*="slide-nav"],' +
-      'button[onclick*="prev"],button[onclick*="next"],' +
-      '.prev-btn,.next-btn,.slide-controls,.navigation{display:none!important;}' +
-      'body[data-renoir-mode="present"] > header,' +
-      'body[data-renoir-mode="present"] > nav,' +
-      'body[data-renoir-mode="present"] header.site-header,' +
-      'body[data-renoir-mode="present"] nav.topnav{' +
-        'position:absolute!important;top:0!important;left:0!important;right:0!important;' +
-        'z-index:20!important;width:100%!important;}' +
-      'body[data-renoir-mode="present"] footer[data-renoir-footer-fixed],' +
-      'body[data-renoir-mode="present"] [role="contentinfo"][data-renoir-footer-fixed]{' +
-        'position:fixed!important;bottom:0!important;left:0!important;right:0!important;' +
-        'z-index:30!important;width:100%!important;margin:0!important;' +
-        'max-height:min(40vh,280px)!important;overflow-y:auto!important;' +
-        'box-sizing:border-box!important;-webkit-overflow-scrolling:touch;}' +
-      'body[data-renoir-mode="present"] section,' +
-      'body[data-renoir-mode="present"] [data-slide]{' +
-        'position:absolute!important;top:0!important;left:0!important;' +
-        'width:100%!important;height:100%!important;margin:0!important;' +
-        'padding-top:var(--renoir-chrome-top,72px)!important;' +
-        'padding-bottom:var(--renoir-chrome-bottom,0px)!important;' +
-        'box-sizing:border-box!important;overflow:hidden!important;' +
-        'display:flex!important;flex-direction:column!important;align-items:stretch!important;' +
-        'transition:transform 380ms cubic-bezier(0.16,1,0.3,1)!important;' +
-        'will-change:transform;z-index:1;' +
-      '}' +
-      'body[data-renoir-mode="present"] [data-renoir-fit-root]{' +
-        'width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;flex-shrink:0!important;' +
-      '}' +
-      'body[data-renoir-mode="present"] section *,' +
-      'body[data-renoir-mode="present"] [data-slide] *{max-width:100%;box-sizing:border-box;}' +
-      'body[data-renoir-mode="present"] section table,' +
-      'body[data-renoir-mode="present"] [data-slide] table{display:block;overflow-x:auto;max-width:100%;}' +
-      'body[data-renoir-mode="present"] [data-renoir-fit-root] h1,' +
-      'body[data-renoir-mode="present"] [data-renoir-fit-root] h2{' +
-        'font-size:clamp(1.15rem,4.5vw,2.25rem)!important;line-height:1.15!important;}' +
-      'body[data-renoir-mode="present"] [data-renoir-fit-root] p,' +
-      'body[data-renoir-mode="present"] [data-renoir-fit-root] li{' +
-        'font-size:clamp(0.7rem,2.2vw,0.95rem)!important;line-height:1.35!important;}' +
-      'body[data-renoir-mode="present"] [class*="plan"] ul li:nth-child(n+5),' +
-      'body[data-renoir-mode="present"] [class*="card"] ul li:nth-child(n+5){display:none!important;}' +
-      'body[data-renoir-mode="present"] table{font-size:clamp(0.65rem,1.8vw,0.85rem)!important;}' +
-      '@media(max-width:1024px){' +
-        'body[data-renoir-mode="present"] section [class*="plans"],' +
-        'body[data-renoir-mode="present"] section [class*="pricing"],' +
-        'body[data-renoir-mode="present"] section [class*="tiers"],' +
-        'body[data-renoir-mode="present"] [data-slide] [class*="plans"],' +
-        'body[data-renoir-mode="present"] [data-slide] [class*="pricing"],' +
-        'body[data-renoir-mode="present"] [data-slide] [class*="tiers"]{' +
-          'display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:0.4rem!important;}' +
-        'body[data-renoir-mode="present"] section .card,' +
-        'body[data-renoir-mode="present"] section [class*="card"],' +
-        'body[data-renoir-mode="present"] section [class*="plan"],' +
-        'body[data-renoir-mode="present"] [data-slide] .card,' +
-        'body[data-renoir-mode="present"] [data-slide] [class*="card"],' +
-        'body[data-renoir-mode="present"] [data-slide] [class*="plan"]{' +
-          'width:100%!important;max-width:100%!important;min-width:0!important;padding:0.65rem!important;}' +
-        'body[data-renoir-mode="present"] [data-renoir-fit-root] [class*="price"],' +
-        'body[data-renoir-mode="present"] [data-renoir-fit-root] [class*="amount"]{' +
-          'font-size:clamp(1.1rem,4vw,1.75rem)!important;}' +
-      '}' +
-      '@media(max-width:480px){' +
-        'body[data-renoir-mode="present"] section [class*="plans"],' +
-        'body[data-renoir-mode="present"] section [class*="pricing"],' +
-        'body[data-renoir-mode="present"] section [class*="tiers"],' +
-        'body[data-renoir-mode="present"] section [class*="grid"],' +
-        'body[data-renoir-mode="present"] [data-slide] [class*="plans"],' +
-        'body[data-renoir-mode="present"] [data-slide] [class*="pricing"],' +
-        'body[data-renoir-mode="present"] [data-slide] [class*="tiers"],' +
-        'body[data-renoir-mode="present"] [data-slide] [class*="grid"]{' +
-          'grid-template-columns:1fr!important;gap:0.5rem!important;}' +
-      '}' +
-      '@media(max-width:1024px){' +
-        'body[data-renoir-mode="present"] footer[data-renoir-footer-fixed],' +
-        'body[data-renoir-mode="present"] [role="contentinfo"][data-renoir-footer-fixed]{' +
-          'max-height:min(28vh,160px)!important;font-size:11px!important;padding:0.5rem 0.75rem!important;}' +
-        'body[data-renoir-mode="present"] footer[data-renoir-footer-fixed] nav,' +
-        'body[data-renoir-mode="present"] footer[data-renoir-footer-fixed] .browse,' +
-        'body[data-renoir-mode="present"] footer[data-renoir-footer-fixed] [class*="browse"],' +
-        'body[data-renoir-mode="present"] [role="contentinfo"][data-renoir-footer-fixed] nav{' +
-          'display:none!important;}' +
-      '}';
-    document.body.setAttribute('data-renoir-mode', 'present');
-    applyChrome(idx, list);
-    list.forEach(function (el, i) {
-      el.dataset.renoirOwned = '1';
-      el.style.transform = 'translateX(' + ((i - idx) * 100) + '%)';
-      el.removeAttribute('data-renoir-active');
-      if (i === idx) el.setAttribute('data-renoir-active', '1');
-    });
-    scheduleFit();
-  }
-  var activeMode = 'scroll';
-  var activeIdx  = 0;
-  var SCROLL_TAIL_ID = '__renoir_scroll_tail';
-  function removeScrollTail() {
-    var el = document.getElementById(SCROLL_TAIL_ID);
-    if (el) el.remove();
-  }
-  function measureStackedHeight() {
-    var vh = window.innerHeight || document.documentElement.clientHeight || 0;
-    var fromFooter = 0;
-    var footer = document.querySelector('body > footer, body > [role="contentinfo"]');
-    if (footer && footer.style.display !== 'none') {
-      fromFooter = Math.ceil((footer.offsetTop || 0) + (footer.offsetHeight || footer.scrollHeight || 0));
+  function enablePageScroll() {
+    var scrollSt = document.getElementById(SCROLL_STYLE_ID);
+    if (!scrollSt) {
+      scrollSt = document.createElement('style');
+      scrollSt.id = SCROLL_STYLE_ID;
+      document.head.appendChild(scrollSt);
     }
-    var fromSections = 0;
-    var header = document.querySelector('body > header, body > nav, header.site-header, nav.topnav');
-    var main = document.querySelector('main');
-    if (header) fromSections += Math.max(header.offsetHeight || 0, header.scrollHeight || 0);
-    if (main) {
-      var sectionSum = 0;
-      main.querySelectorAll(':scope > section, :scope > [data-slide]').forEach(function (sec) {
-        sectionSum += Math.max(sec.offsetHeight || 0, sec.scrollHeight || 0);
-      });
-      if (sectionSum > 0) fromSections += sectionSum;
-      else fromSections += Math.max(main.offsetHeight || 0, main.scrollHeight || 0);
-    }
-    if (footer && footer.style.display !== 'none') {
-      fromSections += Math.max(footer.offsetHeight || 0, footer.scrollHeight || 0);
-    }
-    var best = Math.max(fromSections, fromFooter > vh ? fromFooter : 0);
-    return Math.ceil(Math.max(best, document.documentElement.scrollHeight || 0));
-  }
-  function syncScrollExtent() {
-    if (document.body.getAttribute('data-renoir-mode') !== 'scroll') return;
-    void document.documentElement.offsetHeight;
-    var total = measureStackedHeight();
-    var current = document.documentElement.scrollHeight || 0;
-    var extra = Math.max(0, total - current + 2);
-    if (extra < 1) {
-      removeScrollTail();
+    if (isDashboardDoc()) {
+      applyDashboardContainment();
       return;
     }
-    var tail = document.getElementById(SCROLL_TAIL_ID);
-    if (!tail) {
-      tail = document.createElement('div');
-      tail.id = SCROLL_TAIL_ID;
-      tail.setAttribute('aria-hidden', 'true');
-      tail.style.cssText = 'clear:both;width:100%;height:0;pointer-events:none;visibility:hidden;';
-      document.body.appendChild(tail);
+    scrollSt.textContent =
+      'html,body{margin:0!important;padding:0!important;width:100%!important;max-width:100%!important;' +
+      'overflow-x:hidden!important;overflow-y:auto!important;' +
+      'height:auto!important;min-height:100%!important;-webkit-overflow-scrolling:touch;box-sizing:border-box!important;}';
+  }
+  function disablePageScroll() {
+    var scrollSt = document.getElementById(SCROLL_STYLE_ID);
+    if (scrollSt) scrollSt.textContent = '';
+  }
+  var HIDE_NAV_CSS =
+    '[data-nav],[class*="nav-btn"],[class*="slide-nav"],' +
+    'button[onclick*="prev"],button[onclick*="next"],' +
+    '.prev-btn,.next-btn,.slide-controls,.navigation,' +
+    'a.skip-link,.skip-to-main,.skip-to-content{display:none!important;}';
+  var HIDE_DECK_CHROME_CSS =
+    '.deck-counter,.deck-hint,.deck-progress,#deck-counter,#deck-progress,#deck-hint,' +
+    '#nav,#hint,.deck-nav,.presentation-nav,' +
+    'body>.deck-counter,body>.deck-hint,body>.deck-progress,' +
+    'body>nav:not([class*="slide"]){display:none!important;visibility:hidden!important;}';
+  function applyHorizontal(idx) {
+    var list = slides();
+    var st = ensureStyle();
+    disablePageScroll();
+    neutralizeDeckTrack();
+    ensureContrastStyles();
+    if (list.length === 1 && list[0] === document.body) {
+      st.textContent = HIDE_NAV_CSS + HIDE_DECK_CHROME_CSS;
+      document.body.setAttribute('data-renoir-mode', 'present-single');
+      enablePageScroll();
+      parent.postMessage({ type: 'renoir:nav-state', idx: 0, total: 1 }, '*');
+      return;
     }
-    tail.style.height = extra + 'px';
+    st.textContent =
+      HIDE_NAV_CSS +
+      HIDE_DECK_CHROME_CSS +
+      'html{margin:0!important;padding:0!important;overflow:hidden!important;height:100%!important;width:100%!important;max-height:100%!important;}' +
+      'body[data-renoir-mode="present"]{' +
+        'margin:0!important;padding:0!important;display:block!important;overflow:hidden!important;' +
+        'height:100%!important;width:100%!important;min-height:100%!important;max-height:100%!important;' +
+        'scroll-snap-type:none!important;scroll-behavior:auto!important;position:relative!important;' +
+      '}' +
+      'body[data-renoir-mode="present"] .deck,body[data-renoir-mode="present"] #deck{' +
+        'position:relative!important;transform:none!important;display:block!important;' +
+        'height:100%!important;width:100%!important;overflow:hidden!important;' +
+      '}' +
+      'body[data-renoir-mode="present"] .' + SLIDE_CLASS + '{' +
+        'transition:none!important;animation:none!important;' +
+        'scroll-snap-align:none!important;' +
+      '}' +
+      'body[data-renoir-mode="present"] .' + SLIDE_CLASS + '[hidden],' +
+      'body[data-renoir-mode="present"] .slide:not(.is-active)[data-renoir-owned="1"]{' +
+        'display:none!important;visibility:hidden!important;pointer-events:none!important;' +
+        'opacity:0!important;' +
+      '}' +
+      'body[data-renoir-mode="present"] .slide.is-active,' +
+      'body[data-renoir-mode="present"] .' + SLIDE_CLASS + '[data-renoir-active="1"]{' +
+        'opacity:1!important;visibility:visible!important;pointer-events:auto!important;' +
+        'transform:none!important;z-index:2!important;' +
+        'display:flex!important;flex-direction:column!important;' +
+        'width:100%!important;height:100%!important;min-height:100%!important;' +
+        'overflow:auto!important;box-sizing:border-box!important;' +
+      '}';
+    document.body.setAttribute('data-renoir-mode', 'present');
+    resetScroller();
+    list.forEach(function (el, i) {
+      el.classList.add(SLIDE_CLASS);
+      el.dataset.renoirOwned = '1';
+      el.style.transform = '';
+      el.style.left = '';
+      el.style.top = '';
+      if (i === idx) {
+        el.classList.add('is-active');
+        el.removeAttribute('hidden');
+        el.style.display = '';
+        el.style.opacity = '';
+        el.style.pointerEvents = '';
+        el.setAttribute('data-renoir-active', '1');
+        applySlideContrast(el);
+        revealSlideAnimations(el);
+      } else {
+        el.classList.remove('is-active');
+        el.setAttribute('hidden', '');
+        el.removeAttribute('data-renoir-active');
+      }
+    });
   }
   function applyScroll() {
-    unwrapFitRoots();
-    removeScrollTail();
     var st = ensureStyle();
-    var shell =
-      'html{height:100%!important;overflow-x:hidden!important;overflow-y:auto!important;-webkit-overflow-scrolling:touch;width:100%;margin:0;}' +
-      'body{height:auto!important;min-height:100%!important;overflow:visible!important;width:100%;margin:0;box-sizing:border-box;}' +
-      'body[data-renoir-mode="scroll"] .faq,body[data-renoir-mode="scroll"] details,body[data-renoir-mode="scroll"] .table-wrap,body[data-renoir-mode="scroll"] .table-scroll{' +
-        'overflow:visible!important;max-height:none!important;height:auto!important;}';
-    st.textContent =
-      shell +
-      'main,#content,.page,.site-content{overflow:visible!important;height:auto!important;max-height:none!important;display:block!important;position:relative!important;}' +
-      'body[data-renoir-mode="scroll"] section,' +
-      'body[data-renoir-mode="scroll"] [data-slide]{' +
-        'position:relative!important;inset:auto!important;transform:none!important;' +
-        'width:100%!important;height:auto!important;min-height:unset!important;max-height:none!important;' +
-        'overflow:visible!important;opacity:1!important;visibility:visible!important;' +
-        'display:block!important;padding-top:unset!important;padding-bottom:unset!important;' +
-      '}' +
-      'body[data-renoir-mode="scroll"] footer,' +
-      'body[data-renoir-mode="scroll"] [role="contentinfo"]{position:relative!important;display:block!important;max-height:none!important;overflow:visible!important;}';
-    document.body.setAttribute('data-renoir-mode', 'scroll');
-    document.documentElement.style.cssText = '';
-    document.body.style.cssText = '';
-    clearChrome();
-    document.querySelectorAll('footer, [role="contentinfo"]').forEach(function (el) {
-      el.style.display = '';
-      el.style.position = '';
-      delete el.dataset.renoirFooterFixed;
-      delete el.dataset.renoirChrome;
-    });
-    document.querySelectorAll('section, [data-slide], main').forEach(function (el) {
-      if (el === document.body) return;
-      ['position','top','left','right','bottom','width','height','minHeight','maxHeight',
-        'transform','transition','overflow','paddingTop','paddingBottom','zoom'
-      ].forEach(function (p) { el.style[p] = ''; });
-      el.removeAttribute('data-renoir-active');
-      delete el.dataset.renoirOwned;
-    });
+    st.textContent = '';
+    document.body.removeAttribute('data-renoir-mode');
+    document.body.style.transform = '';
+    enablePageScroll();
     slides().forEach(function (el) {
-      if (el !== document.body) clearInline(el);
+      clearInline(el);
+      el.removeAttribute('data-renoir-active');
     });
-    syncScrollExtent();
-    setTimeout(syncScrollExtent, 0);
-    setTimeout(syncScrollExtent, 120);
-    setTimeout(syncScrollExtent, 400);
-    setTimeout(syncScrollExtent, 1000);
+  }
+  function rerenderCharts() {
+    function attempt() {
+      if (typeof window.__renoirRunMermaid !== 'function') return;
+      Promise.resolve(window.__renoirRunMermaid())
+        .then(function () { setTimeout(reportSize, 100); })
+        .catch(function () { /* swallow */ });
+    }
+    setTimeout(attempt, 30);
+    setTimeout(attempt, 180);
+    setTimeout(attempt, 450);
+    setTimeout(attempt, 900);
   }
   function focus(idx, mode) {
     var list = slides();
     var clamped = Math.max(0, Math.min(list.length - 1, idx));
-    if (mode === 'present') applyHorizontal(clamped);
-    else applyScroll();
+    if (mode === 'present')      applyHorizontal(clamped);
+    else                         applyScroll();
+    rerenderCharts();
     parent.postMessage({ type: 'renoir:nav-state', idx: clamped, total: list.length }, '*');
     return clamped;
   }
-  function nav(dir, idx) {
+  var activeMode = 'scroll';
+  var activeIdx  = 0;
+  function navigate(dir, idx) {
     var list = slides();
-    if (dir === 'next') return Math.min(list.length - 1, activeIdx + 1);
-    if (dir === 'prev') return Math.max(0, activeIdx - 1);
-    if (typeof idx === 'number') return Math.max(0, Math.min(list.length - 1, idx));
-    return activeIdx;
+    if (dir === 'next')          activeIdx = Math.min(list.length - 1, activeIdx + 1);
+    else if (dir === 'prev')     activeIdx = Math.max(0, activeIdx - 1);
+    else if (typeof idx === 'number') activeIdx = idx;
+    activeIdx = focus(activeIdx, activeMode);
   }
+  function bootPresentIfDeck() {
+    var list = slides();
+    if (list.length > 1 && list[0] !== document.body) {
+      activeMode = 'present';
+      activeIdx = focus(activeIdx, 'present');
+    }
+  }
+  function swallowNativeDeckKeys(e) {
+    if (activeMode !== 'present') return;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === ' ' ||
+        e.key === 'PageDown' || e.key === 'PageUp' || e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') navigate('next');
+      else if (e.key === 'ArrowLeft' || e.key === 'PageUp') navigate('prev');
+      else if (e.key === 'Home') navigate(null, 0);
+      else if (e.key === 'End') navigate(null, 999);
+    }
+  }
+  window.addEventListener('keydown', swallowNativeDeckKeys, true);
+  document.addEventListener('keydown', swallowNativeDeckKeys, true);
+  function lockScroller() {
+    if (activeMode !== 'present' || document.body.getAttribute('data-renoir-mode') !== 'present') return;
+    if (document.body.scrollLeft !== 0) document.body.scrollLeft = 0;
+    if (document.body.scrollTop !== 0) document.body.scrollTop = 0;
+    if (document.documentElement.scrollLeft !== 0) document.documentElement.scrollLeft = 0;
+    if (document.documentElement.scrollTop !== 0) document.documentElement.scrollTop = 0;
+  }
+  document.addEventListener('scroll', lockScroller, true);
+  window.addEventListener('scroll', lockScroller, true);
   window.addEventListener('message', function (e) {
     var d = e.data || {};
     if (d.type === 'renoir:set-mode') {
-      var prevMode = activeMode;
-      activeMode = d.mode || 'scroll';
-      if (activeMode === 'present' && prevMode !== 'present') activeIdx = 0;
-      activeIdx = focus(activeIdx, activeMode);
+      activeMode = d.mode;
+      activeIdx  = focus(activeIdx, activeMode);
     } else if (d.type === 'renoir:nav') {
-      if (activeMode !== 'present') activeMode = 'present';
-      activeIdx = nav(d.dir, d.idx);
-      activeIdx = focus(activeIdx, activeMode);
+      navigate(d.dir, d.idx);
     } else if (d.type === 'renoir:probe') {
       var l = slides();
-      if (activeMode === 'scroll') applyScroll();
-      else focus(activeIdx, activeMode);
       parent.postMessage({ type: 'renoir:nav-state', idx: activeIdx, total: l.length }, '*');
+    } else if (d.type === 'renoir:set-viewport') {
+      var vw = Math.max(320, Math.min(2560, Number(d.width) || window.innerWidth));
+      var vp = document.querySelector('meta[name="viewport"]');
+      if (!vp) {
+        vp = document.createElement('meta');
+        vp.setAttribute('name', 'viewport');
+        document.head.appendChild(vp);
+      }
+      vp.setAttribute('content', 'width=' + vw + ', initial-scale=1');
+      applyMobileSidebar(vw);
+      applyDashboardContainment();
+      reportSize();
+      rerenderCharts();
+    } else if (d.type === 'renoir:reload') {
+      focus(activeIdx, activeMode);
+      applyMobileSidebar(currentViewportWidth());
+      applyDashboardContainment();
+      rerenderCharts();
+      reportSize();
     }
-  });
-  window.addEventListener('resize', function () {
-    if (activeMode === 'present') scheduleFit();
-    else if (activeMode === 'scroll') syncScrollExtent();
   });
   window.addEventListener('keydown', function (e) {
-    if (activeMode !== 'present') return;
-    var t = e.target;
-    var tag = t && t.tagName ? t.tagName.toLowerCase() : '';
-    if (tag === 'input' || tag === 'textarea' || (t && t.isContentEditable)) return;
-    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+    if (e.key === 'Escape' && document.body.classList.contains('renoir-sidebar-open')) {
       e.preventDefault();
-      activeIdx = nav('next');
-      activeIdx = focus(activeIdx, activeMode);
-    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-      e.preventDefault();
-      activeIdx = nav('prev');
-      activeIdx = focus(activeIdx, activeMode);
+      closeMobileSidebar();
     }
   });
+  window.addEventListener('wheel', function (e) {
+    if (activeMode !== 'present') return;
+    e.preventDefault();
+  }, { passive: false });
+  function reportSize() {
+    if (activeMode !== 'scroll') return;
+    var h = Math.max(
+      document.documentElement.scrollHeight || 0,
+      document.body ? document.body.scrollHeight : 0,
+    );
+    parent.postMessage({ type: 'renoir:size', height: h }, '*');
+  }
   var sizeObserver;
   try {
-    sizeObserver = new ResizeObserver(function () {
-      if (activeMode === 'scroll') syncScrollExtent();
-    });
+    sizeObserver = new ResizeObserver(function () { reportSize(); });
     sizeObserver.observe(document.documentElement);
     if (document.body) sizeObserver.observe(document.body);
   } catch (e) { /* swallow */ }
   window.addEventListener('load', function () {
-    if (activeMode === 'scroll') applyScroll();
-    parent.postMessage({ type: 'renoir:nav-state', idx: activeIdx, total: slides().length }, '*');
+    applyMobileSidebar(currentViewportWidth());
+    applyDashboardContainment();
+    bootPresentIfDeck();
+    reportSize();
   });
+  setTimeout(function () { applyMobileSidebar(currentViewportWidth()); applyDashboardContainment(); bootPresentIfDeck(); }, 80);
+  setTimeout(bootPresentIfDeck, 200);
+  setTimeout(reportSize, 200);
+  setInterval(reportSize, 1500);
+
   setTimeout(function () {
-    if (activeMode === 'scroll') syncScrollExtent();
-  }, 200);
-  setTimeout(function () {
-    parent.postMessage({ type: 'renoir:nav-state', idx: activeIdx, total: slides().length }, '*');
+    parent.postMessage({ type: 'renoir:nav-state', idx: 0, total: slides().length }, '*');
   }, 30);
-  ensurePreviewPolish();
-  if (activeMode === 'scroll') applyScroll();
 })();
 </script>`;
 
@@ -484,7 +429,9 @@ export function hasMermaidContent(html: string): boolean {
   return (
     html.includes('class="mermaid"') ||
     html.includes("class='mermaid'") ||
-    html.includes('pre class="mermaid"')
+    html.includes('pre class="mermaid"') ||
+    html.includes('mermaid-placeholder') ||
+    html.includes('data-mermaid-src')
   );
 }
 
@@ -515,20 +462,14 @@ export function injectMermaidScript(html: string): string {
   return html + '\n' + MERMAID_INIT_SCRIPT;
 }
 
-/** Wrap an artifact body with the nav bridge; replaces any prior bridge injection. */
+/** Wrap an artifact body with the nav bridge; idempotent if already wrapped. */
 export function wrapWithBridge(html: string): string {
-  const MARKER = '<!--renoir-nav-bridge-->';
-  let result = injectMermaidScript(html);
-  const markerAt = result.indexOf(MARKER);
-  if (markerAt >= 0) {
-    const scriptEnd = result.indexOf('</script>', markerAt);
-    if (scriptEnd >= 0) {
-      result = result.slice(0, markerAt) + result.slice(scriptEnd + '</script>'.length);
-    } else {
-      result = result.slice(0, markerAt);
-    }
-  }
+  if (html.includes('id="__renoir_mode_style"') || html.includes('renoir:nav-state')) return html;
 
+  // Inject mermaid support BEFORE the nav bridge
+  let result = injectMermaidScript(html);
+
+  // Inject nav bridge before </body> if present, otherwise at the end.
   if (/<\/body>/i.test(result)) return result.replace(/<\/body>/i, `${NAV_BRIDGE}</body>`);
   if (/<\/html>/i.test(result)) return result.replace(/<\/html>/i, `${NAV_BRIDGE}</html>`);
   return result + NAV_BRIDGE;

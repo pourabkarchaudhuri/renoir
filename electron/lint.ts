@@ -2,6 +2,9 @@
 // generated HTML document. Intentionally cheap — no full DOM parser, just
 // regex spot-checks. Renderer shows a quick scorecard.
 
+import { isDashboardArtifact, missingDashboardRegions, normalizeDashboardRegionIds, tagHeuristicDashboardRegions } from '../shared/dashboard-layout.js';
+import { lintDashboardCharts } from '../shared/dashboard-charts.js';
+
 export interface LintFinding {
   level: 'error' | 'warn' | 'info';
   rule: string;
@@ -20,50 +23,103 @@ const RULES: ((html: string) => LintFinding | null)[] = [
     : { level: 'error', rule: 'doctype', message: 'Missing <!doctype html> declaration' },
   (html) => /<html[\s>]/i.test(html) ? null
     : { level: 'error', rule: 'html-root', message: 'No <html> root element' },
-  (html) => /<title>[^<]+<\/title>/i.test(html) ? null
+  (html) => /<title>[^<]*\S[^<]*<\/title>/i.test(html) ? null
     : { level: 'warn',  rule: 'title', message: 'No non-empty <title>' },
-  (html) => /<meta[^>]+name="viewport"/i.test(html) ? null
+  (html) => /<meta[^>]+name=["']viewport["']/i.test(html) ? null
     : { level: 'warn',  rule: 'viewport', message: 'Missing viewport meta tag' },
-  (html) => /<main[\s>]/i.test(html) ? null
-    : { level: 'info',  rule: 'main', message: 'No <main> landmark — consider adding one' },
-  (html) => /<h1[\s>]/i.test(html) ? null
-    : { level: 'warn',  rule: 'h1', message: 'Document has no <h1>' },
+  (html) => /<main[\s>]/i.test(html) || /<article[\s>]/i.test(html) ? null
+    : { level: 'info',  rule: 'main', message: 'No <main> or <article> landmark — consider adding one' },
+  (html) => /<h[1-6][\s>]/i.test(html) || /role=["']heading["']/i.test(html) ? null
+    : { level: 'warn',  rule: 'heading', message: 'Document has no heading (h1–h6)' },
   (html) => {
     const imgs = html.match(/<img\b[^>]*>/gi) || [];
-    const missing = imgs.filter((tag) => !/\balt\s*=/.test(tag));
+    const missing = imgs.filter((tag) => {
+      if (/\balt\s*=/.test(tag)) return false;
+      if (/\baria-hidden\s*=\s*["']?true["']?/i.test(tag)) return false;
+      if (/\brole\s*=\s*["']?presentation["']?/i.test(tag)) return false;
+      return true;
+    });
     if (missing.length === 0) return null;
     return { level: 'warn', rule: 'img-alt', message: `${missing.length} <img> without alt text` };
   },
   (html) => {
     const inputs = html.match(/<input\b[^>]*>/gi) || [];
-    const missing = inputs.filter((t) => !/\b(aria-label|aria-labelledby|id\s*=)/.test(t));
+    const missing = inputs.filter((t) => {
+      if (/\btype\s*=\s*["']?(hidden|submit|button|reset|image)["']?/i.test(t)) return false;
+      return !/\b(aria-label|aria-labelledby|title\s*=|placeholder\s*=|id\s*=)/i.test(t);
+    });
     if (missing.length === 0) return null;
     return { level: 'warn', rule: 'input-label', message: `${missing.length} <input> with no obvious label` };
   },
-  (html) => /target="_blank"[^>]*(?!rel)/i.test(html) && !/rel=["'][^"']*noopener/.test(html)
-    ? { level: 'warn', rule: 'noopener', message: 'target="_blank" link without rel="noopener"' }
-    : null,
+  (html) => {
+    const links = html.match(/<a\b[^>]*>/gi) || [];
+    const bad = links.filter(
+      (tag) => /target\s*=\s*["']_blank["']/i.test(tag)
+        && !/rel\s*=\s*["'][^"']*noopener/i.test(tag),
+    );
+    if (bad.length === 0) return null;
+    return { level: 'warn', rule: 'noopener', message: `${bad.length} target="_blank" link(s) without rel="noopener"` };
+  },
   (html) => {
     const buttons = html.match(/<button\b[^>]*>([\s\S]*?)<\/button>/gi) || [];
-    const empty = buttons.filter((b) => !/[A-Za-z0-9]/.test(b.replace(/<[^>]+>/g, '')));
+    const empty = buttons.filter((b) => {
+      if (/\baria-label\s*=/.test(b)) return false;
+      if (/\baria-labelledby\s*=/.test(b)) return false;
+      return !/[A-Za-z0-9]/.test(b.replace(/<[^>]+>/g, ''));
+    });
     if (empty.length === 0) return null;
     return { level: 'warn', rule: 'button-empty', message: `${empty.length} <button> with no readable text` };
   },
   (html) => /style="\s*color\s*:\s*#fff[^"']*background[^"']*#fff/i.test(html)
     ? { level: 'warn', rule: 'contrast', message: 'Likely white-on-white inline style' }
     : null,
-  (html) => /<a\b[^>]*>(\s|click here|here|read more)\s*<\/a>/i.test(html)
+  (html) => /<a\b[^>]*>\s*(click here|here|read more)\s*<\/a>/i.test(html)
     ? { level: 'info', rule: 'link-text', message: 'Generic link text ("here", "click here", "read more")' }
     : null,
-  (html) => /(<script[^>]*src="http:\/\/)|(<link[^>]*href="http:\/\/)/i.test(html)
+  (html) => /(<script[^>]*src=["']http:\/\/[^"']+["'])|(<link[^>]*href=["']http:\/\/[^"']+["'])/i.test(html)
     ? { level: 'warn', rule: 'mixed-content', message: 'Loading subresources over http://' }
     : null,
-  (html) => html.length < 600
-    ? { level: 'info', rule: 'thin', message: 'Artifact body is unusually short' }
-    : null,
+  (html) => {
+    const isDeck = /<section[\s>]/i.test(html) || /data-slide/i.test(html);
+    if (isDeck || html.length >= 400) return null;
+    return { level: 'info', rule: 'thin', message: 'Artifact body is unusually short' };
+  },
   (html) => html.length > 200_000
     ? { level: 'info', rule: 'fat', message: 'Artifact is large — consider trimming' }
     : null,
+  (html) => {
+    if (!isDashboardArtifact(html)) return null;
+    let normalized = normalizeDashboardRegionIds(html);
+    normalized = tagHeuristicDashboardRegions(normalized);
+    const missing = missingDashboardRegions(normalized);
+    if (!missing.length) return null;
+    return {
+      level: 'warn',
+      rule: 'dashboard-regions',
+      message: `Missing required dashboard regions (data-od-id): ${missing.join(', ')}`,
+    };
+  },
+  (html) => {
+    if (!isDashboardArtifact(html)) return null;
+    if (!/\b100vw\b/.test(html)) return null;
+    return {
+      level: 'warn',
+      rule: 'dashboard-vw',
+      message: 'Avoid 100vw in dashboards — use 100% to prevent horizontal misalignment',
+    };
+  },
+  (html) => {
+    if (!isDashboardArtifact(html)) return null;
+    const nested = html.match(
+      /(?:data-od-id=["'](?:topbar|kpis|primary-chart|secondary-panel)["'][^>]*style=["'][^"']*overflow\s*:\s*(?:auto|scroll)|(?:\.chart|\.panel|\.kpi|\.card|\.widget)[^{]*\{[^}]*overflow\s*:\s*(?:auto|scroll))/gi,
+    );
+    if (!nested?.length) return null;
+    return {
+      level: 'warn',
+      rule: 'dashboard-nested-scroll',
+      message: 'Dashboard widgets must not scroll — use overflow:hidden on cards/charts/tables; only main scrolls',
+    };
+  },
 ];
 
 export function lintArtifact(html: string): LintReport {
@@ -71,6 +127,9 @@ export function lintArtifact(html: string): LintReport {
   for (const rule of RULES) {
     try { const f = rule(html); if (f) findings.push(f); }
     catch { /* swallow rule error */ }
+  }
+  if (isDashboardArtifact(html)) {
+    for (const f of lintDashboardCharts(html)) findings.push(f);
   }
   const errors   = findings.filter((f) => f.level === 'error').length;
   const warnings = findings.filter((f) => f.level === 'warn').length;

@@ -3,7 +3,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { app } from 'electron';
-import { syncActiveSession } from '../shared/skill-sessions.js';
 const DEFAULT = {
     byok: {},
     projects: [],
@@ -58,13 +57,12 @@ export const store = {
         return load().projects.find((p) => p.id === id);
     },
     upsertProject(record) {
-        const synced = syncActiveSession(record, record.skillId || 'web-prototype');
         const s = load();
-        const idx = s.projects.findIndex((p) => p.id === synced.id);
+        const idx = s.projects.findIndex((p) => p.id === record.id);
         if (idx >= 0)
-            s.projects[idx] = synced;
+            s.projects[idx] = record;
         else
-            s.projects.push(synced);
+            s.projects.push(record);
         flush();
     },
     deleteProject(id) {

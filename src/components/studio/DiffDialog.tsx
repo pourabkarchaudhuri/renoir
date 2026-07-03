@@ -1,6 +1,8 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, GitCompare } from 'lucide-react';
 import { useStudio } from '@/lib/store';
+import { ensureViewportMeta } from '@/lib/preview-surfaces';
+import { wrapWithBridge } from '@/lib/preview-modes';
 
 interface Props {
   open: boolean;
@@ -15,10 +17,13 @@ export function DiffDialog({ open, aId, bId, onClose }: Props) {
   const a = versions.find((v) => v.id === aId);
   const b = versions.find((v) => v.id === bId);
 
-  const wrap = (html: string) =>
-    /^<!doctype/i.test(html)
+  const wrap = (html: string) => {
+    let doc = /^<!doctype/i.test(html)
       ? html
       : `<!doctype html><html><head><meta charset="utf-8"><script src="https://cdn.tailwindcss.com"></script></head><body>${html}</body></html>`;
+    doc = ensureViewportMeta(doc, 600);
+    return wrapWithBridge(doc);
+  };
 
   return (
     <AnimatePresence>
@@ -59,16 +64,18 @@ export function DiffDialog({ open, aId, bId, onClose }: Props) {
 
 function Pane({ label, html }: { label: string; html: string }) {
   return (
-    <div className="flex flex-col plate rounded-xl overflow-hidden">
-      <div className="px-3 py-1.5 text-[10.5px] uppercase tracking-[0.22em] text-muted-foreground/70 border-b border-border">
+    <div className="flex flex-col plate rounded-xl overflow-hidden min-h-0">
+      <div className="px-3 py-1.5 text-[10.5px] uppercase tracking-[0.22em] text-muted-foreground/70 border-b border-border shrink-0">
         {label}
       </div>
-      <iframe
-        title={label}
-        srcDoc={html}
-        sandbox="allow-scripts"
-        className="flex-1 w-full bg-white"
-      />
+      <div className="flex-1 min-h-0 overflow-auto bg-white">
+        <iframe
+          title={label}
+          srcDoc={html}
+          sandbox="allow-scripts"
+          style={{ width: 600, minHeight: '100%', height: 800, border: 0, display: 'block', margin: '0 auto' }}
+        />
+      </div>
     </div>
   );
 }

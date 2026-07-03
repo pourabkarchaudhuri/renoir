@@ -69,6 +69,7 @@ export interface DesignSystemSummary {
   vibe: string;
   swatches: string[]; // OKLch
   font: string;
+  tokens?: { name: string; value: string }[];
 }
 
 export const IPC = {

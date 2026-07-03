@@ -64,7 +64,9 @@ import { ensurePreviewWindow, pushPreviewHtml, isPreviewOpen } from './preview-w
 import { exportArtifactToPptx } from './pptx.js';
 import { listProjectAssets } from './assets.js';
 let mainWindow = null;
+let closeConfirmed = false;
 function createWindow() {
+    closeConfirmed = false;
     mainWindow = new BrowserWindow({
         width: 1440,
         height: 900,
@@ -104,8 +106,19 @@ function createWindow() {
     else {
         mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
     }
+    mainWindow.on('close', (e) => {
+        if (closeConfirmed)
+            return;
+        e.preventDefault();
+        mainWindow?.webContents.send('renoir:app:flush');
+    });
 }
 function registerIpc() {
+    ipcMain.handle('renoir:app:flush-done', () => {
+        closeConfirmed = true;
+        mainWindow?.close();
+        return { ok: true };
+    });
     // BYOK
     ipcMain.handle('renoir:byok:get', async () => {
         const cfg = store.getByok();
@@ -134,9 +147,11 @@ function registerIpc() {
         const c = azureConfig();
         return {
             configured: azureConfigured(),
+            imageConfigured: azureImageConfigured(),
             imageDeployment: c.imageModel,
             textDeployment: c.textModel,
             endpoint: c.endpoint,
+            imageEndpoint: c.imageEndpoint,
             audioDeployment: process.env.AZURE_AUDIO_DEPLOYMENT || '',
             videoDeployment: process.env.AZURE_VIDEO_DEPLOYMENT || '',
         };
@@ -174,7 +189,7 @@ function registerIpc() {
     ipcMain.handle('renoir:design:list', () => {
         const builtIn = listDesignSystems();
         const custom = customCatalog.listSystems().map((d) => ({
-            id: d.id, name: d.name, vibe: d.vibe, swatches: d.swatches, font: d.font,
+            id: d.id, name: d.name, vibe: d.vibe, swatches: d.swatches, font: d.font, tokens: d.tokens,
         }));
         return [...builtIn, ...custom];
     });
@@ -330,6 +345,18 @@ function registerIpc() {
         // A new assistant version overrides any restore selection.
         if (req.source !== 'restore')
             rec.activeVersionId = undefined;
+        const skillKey = req.skillId ?? rec.skillId;
+        if (skillKey) {
+            if (!rec.skillSessions)
+                rec.skillSessions = {};
+            rec.skillSessions[skillKey] = {
+                ...rec.skillSessions[skillKey],
+                conversation: rec.conversation,
+                versions: rec.versions,
+                activeVersionId: rec.activeVersionId,
+                previewHtml: req.html,
+            };
+        }
         rec.updatedAt = new Date().toISOString();
         store.upsertProject(rec);
         return { ok: true, project: rec };

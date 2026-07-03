@@ -164,5 +164,12 @@ contextBridge.exposeInMainWorld('renoir', {
   saveCustomSystem:    (rec) => ipcRenderer.invoke(C.customSaveSystem, rec),
   deleteCustomSystem:  (id) => ipcRenderer.invoke(C.customDeleteSystem, id),
 
+  onFlushRequest: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('renoir:app:flush', handler);
+    return () => ipcRenderer.removeListener('renoir:app:flush', handler);
+  },
+  flushDone: () => ipcRenderer.invoke('renoir:app:flush-done'),
+
   platform: process.platform,
 });

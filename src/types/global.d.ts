@@ -29,6 +29,7 @@ export interface DesignSystemSummary {
   vibe: string;
   swatches: string[];
   font: string;
+  tokens?: { name: string; value: string }[];
 }
 
 export interface PromptTemplate {
@@ -151,6 +152,14 @@ export interface SkillSession {
   conversation: ProjectMessage[];
   versions?: ArtifactVersion[];
   activeVersionId?: string;
+  /** Cached artifact HTML for instant preview restore after relaunch. */
+  previewHtml?: string;
+  /** In-flight generation buffer for this skill (survives skill switches). */
+  pendingAssistant?: string;
+  isStreaming?: boolean;
+  streamStatus?: 'idle' | 'streaming' | 'stalled' | 'retrying';
+  retryNote?: string;
+  conversationId?: string;
 }
 
 export interface ProjectRecord {
@@ -167,6 +176,7 @@ export interface ProjectRecord {
   artifacts: ProjectArtifact[];
   versions?: ArtifactVersion[];
   activeVersionId?: string;
+  /** Per-skill chat + preview state; top-level conversation/versions mirror the active skill. */
   skillSessions?: Record<string, SkillSession>;
 }
 
@@ -187,7 +197,6 @@ export interface RenoirAPI {
   listSkills:           () => Promise<SkillSummary[]>;
   getSkillPrimer:       (id: string) => Promise<string | null>;
   listDesignSystems:    () => Promise<DesignSystemSummary[]>;
-  getDesignSystem:      (id: string) => Promise<{ id: string; name: string; tokens: { name: string; value: string }[] } | null>;
   listPromptTemplates:  () => Promise<PromptTemplate[]>;
   listVisualDirections: () => Promise<VisualDirection[]>;
 
@@ -300,7 +309,7 @@ export interface RenoirAPI {
     Promise<{ ok: boolean; project?: ProjectRecord; error?: string }>;
   renameProject: (req: { id: string; name: string }) =>
     Promise<{ ok: boolean; project?: ProjectRecord; error?: string }>;
-  addVersion: (req: { id: string; html: string; source?: 'assistant' | 'fork' | 'restore'; note?: string }) =>
+  addVersion: (req: { id: string; html: string; source?: 'assistant' | 'fork' | 'restore'; note?: string; skillId?: string }) =>
     Promise<{ ok: boolean; project?: ProjectRecord; deduped?: boolean; error?: string }>;
   restoreVersion: (req: { id: string; versionId: string }) =>
     Promise<{ ok: boolean; project?: ProjectRecord; error?: string }>;
@@ -322,6 +331,9 @@ export interface RenoirAPI {
   listCustomSystems:  () => Promise<CustomDesignSystem[]>;
   saveCustomSystem:   (rec: CustomDesignSystem) => Promise<CustomDesignSystem>;
   deleteCustomSystem: (id: string) => Promise<{ ok: boolean }>;
+
+  onFlushRequest: (cb: () => void) => () => void;
+  flushDone: () => Promise<{ ok: boolean }>;
 
   platform: NodeJS.Platform;
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useUI } from '@/lib/store';
-import { cn } from '@/lib/cn';
+import { ExpandableMessage } from '@/components/chrome/ExpandableMessage';
 
 interface MermaidBlockProps {
   /** Raw Mermaid diagram source text */
@@ -100,15 +100,21 @@ export function MermaidBlock({ source, id }: MermaidBlockProps) {
   if (state.status === 'error') {
     return (
       <div className="my-2 rounded-lg border border-red-500/40 bg-red-500/5 overflow-hidden">
-        <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-red-500/20 text-[11px] text-red-700 dark:text-red-300">
-          <svg className="h-3.5 w-3.5" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 4a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V5zm.75 6.25a.75.75 0 100-1.5.75.75 0 000 1.5z" />
-          </svg>
-          <span>Diagram render failed</span>
+        <div className="px-3 py-2 border-b border-red-500/20">
+          <div className="flex items-center gap-1.5 text-[11px] text-red-700 dark:text-red-300">
+            <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 1a7 7 0 100 14A7 7 0 008 1zm-.75 4a.75.75 0 011.5 0v3a.75.75 0 01-1.5 0V5zm.75 6.25a.75.75 0 100-1.5.75.75 0 000 1.5z" />
+            </svg>
+            <span>Diagram render failed</span>
+          </div>
           {state.error && (
-            <span className="ml-auto text-[10px] opacity-70 truncate max-w-[200px]">
-              {state.error}
-            </span>
+            <ExpandableMessage
+              text={state.error}
+              tone="err"
+              textClassName="mt-1.5 text-[10.5px] text-red-700/90 dark:text-red-200/90"
+              copyLabel="Copy error"
+              expandLabel="Show full error"
+            />
           )}
         </div>
         <pre className="px-3 py-2 text-[12px] leading-relaxed overflow-x-auto text-foreground/80 font-mono whitespace-pre-wrap">

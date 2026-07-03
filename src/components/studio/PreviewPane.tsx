@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Download, Smartphone, Tablet, Monitor, Loader2, Code,
+  Download, Smartphone, Tablet, Monitor, Maximize2, Loader2, Code, RotateCcw,
   BookmarkPlus, ScanSearch, FileText, GitFork, ExternalLink, MoreHorizontal,
-  Maximize2, Minimize2, ChevronLeft, ChevronRight, Presentation, ScrollText, Presentation as PresentIcon,
+  Minimize2, ChevronLeft, ChevronRight, Presentation, ScrollText, Presentation as PresentIcon,
   Upload, FileDown, Save as SaveIcon,
 } from 'lucide-react';
 import { useStudio, useUI, useCatalog } from '@/lib/store';
@@ -11,99 +11,242 @@ import { DiffDialog } from './DiffDialog';
 import { cn } from '@/lib/cn';
 import { motion, AnimatePresence } from 'framer-motion';
 import { LintBadge } from './LintBadge';
-import { PreviewLoading } from './PreviewLoading';
 import { defaultModeForSkill, wrapWithBridge, type PreviewMode } from '@/lib/preview-modes';
+import { enrichProductDeckHtml } from '@/lib/product-deck-content';
+import {
+  PREVIEW_SURFACES,
+  PREVIEW_SURFACE_ORDER,
+  ensureViewportMeta,
+  frameDimensions,
+  isDesktopOnlyPreview,
+  previewSurfacesForSkill,
+  type PreviewSurface,
+} from '@/lib/preview-surfaces';
+import { normalizeArtifactDocument } from '@/lib/artifact-html';
+import { repairArtifactIfNeeded } from '@/lib/artifact-repair';
+import { applySession, getSkillSession, patchSkillSession } from '@/lib/skill-sessions';
+import { DevicePreviewFrame } from './DevicePreviewFrame';
 
-type Surface = 'phone' | 'tablet' | 'desktop';
-
-const SURFACE_SIZES: Record<Surface, { w: number; h: number; label: string }> = {
-  phone:   { w: 390,  h: 844,  label: 'iPhone' },
-  tablet:  { w: 820,  h: 1180, label: 'iPad' },
-  desktop: { w: 1280, h: 800,  label: 'Desktop' },
-};
+type Surface = PreviewSurface;
 
 export function PreviewPane({
   artifact,
-  loading = false,
-  loadingPhase = 'Composing your artifact…',
+  streaming = false,
   imageGenProgress = null,
+  artifactResetKey,
 }: {
   artifact: string | null;
-  loading?: boolean;
-  loadingPhase?: string;
+  streaming?: boolean;
   imageGenProgress?: { done: number; total: number } | null;
+  /** Changes when a new generation or version is selected — resets slide index for deck skills. */
+  artifactResetKey?: string;
 }) {
-  const [surface, setSurface] = useState<Surface>('desktop');
+  const surface = useUI((s) => s.previewSurface);
+  const setPreviewSurface = useUI((s) => s.setPreviewSurface);
   const [showCode, setShowCode] = useState(false);
   const project = useStudio((s) => s.project);
   const skillId = useStudio((s) => s.selectedSkillId);
+  const desktopOnly = isDesktopOnlyPreview(skillId);
+  const activeSurfaces = useMemo(() => previewSurfacesForSkill(skillId), [skillId]);
   const toast = useUI((s) => s.toast);
   const refreshTemplates = useCatalog((s) => s.refreshTemplates);
+  const designSystems = useCatalog((s) => s.designSystems);
+  const directions = useCatalog((s) => s.directions);
+  const selectedDesignSystemId = useStudio((s) => s.selectedDesignSystemId);
+  const selectedDirectionId = useStudio((s) => s.selectedDirectionId);
   const [diff, setDiff] = useState<{ a: string; b: string } | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const iframeRefs = useRef<Record<PreviewSurface, HTMLIFrameElement | null>>({
+    phone: null,
+    tablet: null,
+    desktop: null,
+    ultrawide: null,
+  });
 
-  // Preview mode — default per skill, user can override.
+  // Preview mode — deck skills lock to present; user can override for others.
   const [modeOverride, setModeOverride] = useState<PreviewMode | 'auto'>('auto');
-  const effectiveMode: PreviewMode = modeOverride === 'auto' ? defaultModeForSkill(skillId) : modeOverride;
+  const effectiveMode: PreviewMode = desktopOnly
+    ? 'present'
+    : modeOverride === 'auto'
+      ? defaultModeForSkill(skillId)
+      : modeOverride;
   const [navState, setNavState] = useState<{ idx: number; total: number }>({ idx: 0, total: 1 });
+  const [reloadGen, setReloadGen] = useState(0);
 
+  useEffect(() => {
+    if (desktopOnly && surface !== 'desktop') setPreviewSurface('desktop');
+  }, [desktopOnly, surface, setPreviewSurface]);
+
+  const docTitle = project?.name?.trim() || 'Artifact';
+
+  const dashboardTheme = useMemo(() => {
+    if (skillId !== 'dashboard') return undefined;
+    const ds = designSystems.find((d) => d.id === selectedDesignSystemId);
+    if (!ds?.tokens?.length) return undefined;
+    const dir = directions.find((d) => d.id === selectedDirectionId);
+    return {
+      tokens: ds.tokens,
+      font: ds.font,
+      directionSwatches: dir?.swatches,
+    };
+  }, [skillId, designSystems, directions, selectedDesignSystemId, selectedDirectionId]);
+
+  const srcDocsBySurface = useMemo(() => {
+    if (!artifact) return null;
+    const normalized = normalizeArtifactDocument(artifact, {
+      title: docTitle,
+      theme: dashboardTheme,
+      dashboard: skillId === 'dashboard',
+      productDeck: skillId === 'product-deck',
+      productName: docTitle,
+      productDeckFinalize: !streaming,
+    });
+    const out = {} as Record<PreviewSurface, string>;
+    for (const id of activeSurfaces) {
+      const viewportW = PREVIEW_SURFACES[id].w;
+      const html = ensureViewportMeta(normalized, viewportW);
+      out[id] = wrapWithBridge(html);
+    }
+    return out;
+  }, [artifact, docTitle, dashboardTheme, skillId, activeSurfaces, streaming]);
+
+  useEffect(() => {
+    if (!artifact || !desktopOnly) return;
+    const enriched = enrichProductDeckHtml(artifact, {
+      productName: docTitle,
+      finalize: !streaming,
+    });
+    setNavState((n) => ({
+      idx: Math.min(n.idx, Math.max(0, enriched.slideCount - 1)),
+      total: enriched.slideCount,
+    }));
+  }, [artifact, desktopOnly, docTitle, streaming]);
+
+  const activeSrcDoc = srcDocsBySurface?.[surface] ?? null;
   const baseHtml = useMemo(() => {
     if (!artifact) return null;
-    if (/^<!doctype/i.test(artifact) || /<html[\s>]/i.test(artifact)) return artifact;
-    return `<!doctype html><html><head><meta charset="utf-8"><script src="https://cdn.tailwindcss.com"></script></head><body>${artifact}</body></html>`;
-  }, [artifact]);
-  // Always inject the bridge so mode can be flipped without remounting the
-  // iframe (which used to break the layout briefly mid-switch).
-  const srcDoc = useMemo(() => (baseHtml ? wrapWithBridge(baseHtml) : null), [baseHtml]);
+    return normalizeArtifactDocument(artifact, {
+      title: docTitle,
+      viewportWidth: PREVIEW_SURFACES[surface].w,
+      theme: dashboardTheme,
+      dashboard: skillId === 'dashboard',
+      productDeck: skillId === 'product-deck',
+      productName: docTitle,
+      productDeckFinalize: !streaming,
+    });
+  }, [artifact, surface, docTitle, dashboardTheme, skillId, streaming]);
 
   // Listen for nav-state messages from the iframe bridge.
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       const d = e.data;
-      if (d?.type === 'renoir:nav-state') setNavState({ idx: d.idx ?? 0, total: d.total ?? 1 });
+      if (d?.type !== 'renoir:nav-state') return;
+      if (desktopOnly) {
+        const win = iframeRefs.current.desktop?.contentWindow;
+        if (win && e.source !== win) return;
+      }
+      setNavState({ idx: d.idx ?? 0, total: d.total ?? 1 });
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
+  }, [desktopOnly]);
+
+  const postToSurface = useCallback((surf: PreviewSurface, msg: unknown) => {
+    iframeRefs.current[surf]?.contentWindow?.postMessage(msg, '*');
   }, []);
 
-  const post = (msg: unknown) =>
-    iframeRef.current?.contentWindow?.postMessage(msg, '*');
+  const postNavToDesktop = useCallback((idx: number) => {
+    postToSurface('desktop', { type: 'renoir:set-mode', mode: 'present' });
+    const msg = { type: 'renoir:nav', idx };
+    postToSurface('desktop', msg);
+    window.setTimeout(() => postToSurface('desktop', msg), 80);
+    window.setTimeout(() => postToSurface('desktop', msg), 280);
+  }, [postToSurface]);
 
-  const syncPreviewMode = () => {
-    post({ type: 'renoir:set-mode', mode: effectiveMode });
-    post({ type: 'renoir:probe' });
-  };
+  const navigateSlide = useCallback((action: { dir?: 'prev' | 'next'; idx?: number }) => {
+    setNavState((prev) => {
+      let nextIdx = prev.idx;
+      if (action.dir === 'next') nextIdx = Math.min(prev.total - 1, prev.idx + 1);
+      else if (action.dir === 'prev') nextIdx = Math.max(0, prev.idx - 1);
+      else if (typeof action.idx === 'number') nextIdx = Math.max(0, Math.min(prev.total - 1, action.idx));
+      if (nextIdx === prev.idx) return prev;
+      if (desktopOnly) postNavToDesktop(nextIdx);
+      else {
+        const msg = typeof action.idx === 'number'
+          ? { type: 'renoir:nav', idx: nextIdx }
+          : { type: 'renoir:nav', dir: action.dir };
+        for (const id of activeSurfaces) postToSurface(id, msg);
+      }
+      return { ...prev, idx: nextIdx };
+    });
+  }, [activeSurfaces, desktopOnly, postNavToDesktop, postToSurface]);
 
-  const navSlide = (dir: 'prev' | 'next' | { idx: number }) => {
-    if (effectiveMode !== 'present') {
-      post({ type: 'renoir:set-mode', mode: 'present' });
-    }
-    if (typeof dir === 'object') post({ type: 'renoir:nav', idx: dir.idx });
-    else post({ type: 'renoir:nav', dir });
-  };
-
-  // Tell the iframe what mode is active whenever it (re)loads or mode changes.
+  const resetKeyRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (!srcDoc) return;
-    const id = setTimeout(syncPreviewMode, 50);
-    return () => clearTimeout(id);
-  }, [srcDoc, effectiveMode, surface]);
+    if (!desktopOnly || !artifact || !artifactResetKey) return;
+    if (resetKeyRef.current === artifactResetKey) return;
+    resetKeyRef.current = artifactResetKey;
+    setNavState((n) => ({ idx: 0, total: n.total }));
+    const t = window.setTimeout(() => postNavToDesktop(0), 150);
+    return () => window.clearTimeout(t);
+  }, [artifactResetKey, artifact, desktopOnly, postNavToDesktop]);
 
-  // Keyboard nav for present/pages
+  // Apply mode + viewport to every preview; charts only on the active device.
   useEffect(() => {
-    if (effectiveMode === 'scroll') return;
+    if (!srcDocsBySurface) return;
+    const id = window.setTimeout(() => {
+      for (const surf of activeSurfaces) {
+        const { w } = frameDimensions(surf, effectiveMode);
+        postToSurface(surf, { type: 'renoir:set-viewport', width: w });
+        postToSurface(surf, { type: 'renoir:set-mode', mode: effectiveMode });
+        if (surf === surface) postToSurface(surf, { type: 'renoir:reload' });
+      }
+    }, 120);
+    return () => window.clearTimeout(id);
+  }, [effectiveMode, srcDocsBySurface, reloadGen, surface, activeSurfaces]);
+
+  // When the active device tab changes, reload that preview (charts + layout).
+  useEffect(() => {
+    if (!srcDocsBySurface) return;
+    const { w } = frameDimensions(surface, effectiveMode);
+    const t1 = window.setTimeout(() => {
+      postToSurface(surface, { type: 'renoir:set-viewport', width: w });
+      postToSurface(surface, { type: 'renoir:set-mode', mode: effectiveMode });
+      postToSurface(surface, { type: 'renoir:reload' });
+    }, 30);
+    const t2 = window.setTimeout(() => {
+      postToSurface(surface, { type: 'renoir:reload' });
+    }, 350);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [surface, effectiveMode, srcDocsBySurface, reloadGen]);
+
+  // Keyboard nav for present / deck mode (skip when iframe has focus — it handles keys locally).
+  useEffect(() => {
+    if (effectiveMode !== 'present') return;
     const onKey = (e: KeyboardEvent) => {
+      if (document.activeElement?.tagName === 'IFRAME') return;
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || (t && (t as any).isContentEditable)) return;
-      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown')                { e.preventDefault(); navSlide('next'); }
-      else if (e.key === 'ArrowLeft' || e.key === 'PageUp')                               { e.preventDefault(); navSlide('prev'); }
-      else if (e.key === 'Home')                                                          { e.preventDefault(); navSlide({ idx: 0 }); }
-      else if (e.key === 'End')                                                           { e.preventDefault(); navSlide({ idx: 999 }); }
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+        e.preventDefault();
+        navigateSlide({ dir: 'next' });
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        navigateSlide({ dir: 'prev' });
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        navigateSlide({ idx: 0 });
+      } else if (e.key === 'End') {
+        e.preventDefault();
+        navigateSlide({ idx: 999 });
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [effectiveMode]);
+  }, [effectiveMode, navigateSlide]);
 
   const downloadHtml = async () => {
     if (!artifact || !project) return;
@@ -148,7 +291,7 @@ export function PreviewPane({
     await useStudio.getState().appendUser(userMsg);
     useStudio.getState().startStreaming();
     const lastUserBrief = project.conversation.find((m) => m.role === 'user')?.content || '';
-    const res = await window.renoir.critiqueStart({ conversationId: id, artifactHtml: srcDoc!, brief: lastUserBrief });
+    const res = await window.renoir.critiqueStart({ conversationId: id, artifactHtml: activeSrcDoc!, brief: lastUserBrief });
     if (!res.ok) {
       toast(res.error || 'critique failed', 'err');
       void useStudio.getState().finishStreaming();
@@ -163,11 +306,11 @@ export function PreviewPane({
 
   // Push to detached preview window whenever the artifact changes.
   useEffect(() => {
-    if (!srcDoc) return;
+    if (!activeSrcDoc) return;
     void window.renoir.previewIsOpen().then((open) => {
-      if (open) void window.renoir.pushPreview(srcDoc);
+      if (open) void window.renoir.pushPreview(activeSrcDoc);
     });
-  }, [srcDoc]);
+  }, [activeSrcDoc]);
 
   const fork = async () => {
     if (!project || !artifact) return;
@@ -181,8 +324,8 @@ export function PreviewPane({
   };
 
   const detach = async () => {
-    if (!srcDoc) return;
-    await window.renoir.openPreview(srcDoc);
+    if (!activeSrcDoc) return;
+    await window.renoir.openPreview(activeSrcDoc);
     toast('Detached preview opened', 'ok');
   };
 
@@ -212,13 +355,101 @@ export function PreviewPane({
     }
   };
 
-  const sz = SURFACE_SIZES[surface];
+  const reloadPreviews = useCallback(async () => {
+    const bumpReload = () => {
+      setReloadGen((n) => n + 1);
+      window.setTimeout(() => {
+        for (const id of activeSurfaces) {
+          postToSurface(id, { type: 'renoir:reload' });
+        }
+      }, 150);
+    };
+
+    if (!artifact) {
+      bumpReload();
+      return;
+    }
+
+    const normalizeOpts = {
+      title: docTitle,
+      viewportWidth: PREVIEW_SURFACES[surface].w,
+      theme: dashboardTheme,
+      dashboard: skillId === 'dashboard',
+      productDeck: skillId === 'product-deck',
+      productName: docTitle,
+      productDeckFinalize: !streaming,
+    };
+
+    const previewHtml = baseHtml ?? normalizeArtifactDocument(artifact, normalizeOpts);
+    const lintBefore = await window.renoir.lintArtifact(previewHtml);
+
+    if (lintBefore.errors === 0 && lintBefore.warnings === 0) {
+      bumpReload();
+      toast('Preview reloaded', 'ok');
+      return;
+    }
+
+    const repair = await repairArtifactIfNeeded(
+      artifact,
+      normalizeOpts,
+      window.renoir.lintArtifact,
+      previewHtml,
+    );
+    if (repair.improved && project) {
+      const fixedCount = repair.before.findings.length - repair.after.findings.length;
+      const verRes = await window.renoir.addVersion({
+        id: project.id,
+        html: repair.html,
+        source: 'assistant',
+        skillId,
+        note: `Fixed ${fixedCount} lint finding(s) on reload`,
+      });
+      if (verRes.ok && verRes.project) {
+        let next = patchSkillSession(verRes.project, skillId, {
+          previewHtml: repair.html,
+          versions: getSkillSession(verRes.project, skillId).versions,
+        });
+        if (skillId === useStudio.getState().selectedSkillId) {
+          next = applySession(next, skillId);
+        }
+        setProject(next);
+        toast(`Fixed ${fixedCount} preview issue${fixedCount === 1 ? '' : 's'}`, 'ok');
+      } else {
+        toast('Preview reloaded', 'ok');
+      }
+    } else {
+      toast('Preview reloaded', 'ok');
+    }
+
+    bumpReload();
+  }, [
+    artifact,
+    baseHtml,
+    docTitle,
+    surface,
+    dashboardTheme,
+    skillId,
+    streaming,
+    project,
+    activeSurfaces,
+    postToSurface,
+    setProject,
+    toast,
+  ]);
+
+  useEffect(() => {
+    const onReload = () => reloadPreviews();
+    window.addEventListener('renoir:reload-preview', onReload);
+    return () => window.removeEventListener('renoir:reload-preview', onReload);
+  }, [reloadPreviews]);
+
+  const sz = frameDimensions(surface, effectiveMode);
 
   return (
-    <section className="flex-1 min-w-0 flex flex-col bg-canvas/50">
+    <section className="h-full min-h-0 flex-1 min-w-0 flex flex-col bg-canvas/50">
       <VersionStrip onCompare={(a, b) => setDiff({ a, b })} />
       <div className="px-3 py-2 border-b border-border flex items-center gap-1.5">
-        {loading && (
+        {streaming && (
           <span className="flex items-center gap-1.5 px-1.5 h-6 rounded text-[10px] uppercase tracking-[0.18em] text-primary bg-primary/10 ring-1 ring-primary/30">
             <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
             live
@@ -230,15 +461,30 @@ export function PreviewPane({
             Generating images: {imageGenProgress.done}/{imageGenProgress.total}
           </span>
         )}
-        <ModeTabs mode={effectiveMode} onChange={setModeOverride} />
-        <SurfaceTab id="phone"   surface={surface} setSurface={setSurface} icon={<Smartphone className="h-3.5 w-3.5" strokeWidth={1.6} />} />
-        <SurfaceTab id="tablet"  surface={surface} setSurface={setSurface} icon={<Tablet className="h-3.5 w-3.5" strokeWidth={1.6} />} />
-        <SurfaceTab id="desktop" surface={surface} setSurface={setSurface} icon={<Monitor className="h-3.5 w-3.5" strokeWidth={1.6} />} />
+        <ModeTabs mode={effectiveMode} onChange={setModeOverride} hidden={desktopOnly} />
+        {!desktopOnly && (
+          <>
+            <SurfaceTab id="phone"     surface={surface} setSurface={setPreviewSurface} icon={<Smartphone className="h-3.5 w-3.5" strokeWidth={1.6} />} />
+            <SurfaceTab id="tablet"    surface={surface} setSurface={setPreviewSurface} icon={<Tablet className="h-3.5 w-3.5" strokeWidth={1.6} />} />
+            <SurfaceTab id="desktop"   surface={surface} setSurface={setPreviewSurface} icon={<Monitor className="h-3.5 w-3.5" strokeWidth={1.6} />} />
+            <SurfaceTab id="ultrawide" surface={surface} setSurface={setPreviewSurface} icon={<Maximize2 className="h-3.5 w-3.5" strokeWidth={1.6} />} />
+          </>
+        )}
         <span className="ml-1 text-[10px] uppercase tracking-[0.22em] text-muted-foreground/70">
-          {sz.w}×{sz.h}
+          {desktopOnly ? 'Desktop' : ''} {sz.w}×{sz.h}
         </span>
-        {effectiveMode === 'present' && (
-          <SlideNav nav={navState} onPrev={() => navSlide('prev')} onNext={() => navSlide('next')} />
+        {effectiveMode === 'present' && !desktopOnly && (
+          <SlideNav nav={navState} onPrev={() => navigateSlide({ dir: 'prev' })} onNext={() => navigateSlide({ dir: 'next' })} />
+        )}
+        {artifact && (
+          <button
+            type="button"
+            onClick={reloadPreviews}
+            className="h-7 w-7 grid place-items-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            title="Reload preview (all devices)"
+          >
+            <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.6} />
+          </button>
         )}
         <div className="ml-auto flex items-center gap-1.5">
           {artifact && <LintBadge html={baseHtml} />}
@@ -249,6 +495,7 @@ export function PreviewPane({
               { label: 'Export PDF',        icon: <FileText className="h-3.5 w-3.5" strokeWidth={1.6} />,     onClick: exportPdf,          disabled: !artifact, group: 'save' },
               { label: 'Export PPTX',       icon: <PresentIcon className="h-3.5 w-3.5" strokeWidth={1.6} />,  onClick: exportPptx,         disabled: !artifact, group: 'save' },
               { label: 'Save as template',  icon: <BookmarkPlus className="h-3.5 w-3.5" strokeWidth={1.6} />, onClick: saveAsTemplate,     disabled: !artifact, group: 'save' },
+              { label: 'Reload preview',    icon: <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.6} />, onClick: reloadPreviews,     disabled: !artifact, group: 'view' },
               { label: 'Toggle source',     icon: <Code className="h-3.5 w-3.5" strokeWidth={1.6} />,         active: showCode, onClick: () => setShowCode((v) => !v), disabled: !artifact, group: 'view' },
               { label: 'Detach preview',    icon: <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.6} />, onClick: detach,             disabled: !artifact, group: 'view' },
               { label: 'Critique (5-dim)',  icon: <ScanSearch className="h-3.5 w-3.5" strokeWidth={1.6} />,   onClick: runCritique,        disabled: !artifact, group: 'view' },
@@ -260,67 +507,40 @@ export function PreviewPane({
         </div>
       </div>
 
-      <div className="flex-1 relative overflow-auto p-6 grain flex items-start justify-center">
-        <AnimatePresence mode="wait">
-          {loading && !srcDoc ? (
-            <PreviewLoading key="loading" phase={loadingPhase} />
-          ) : !srcDoc ? (
-            <PreviewEmpty key="empty" />
-          ) : showCode ? (
-            <motion.pre
-              key="code"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="plate rounded-xl p-4 w-full max-w-full text-[11px] font-mono leading-relaxed overflow-auto whitespace-pre-wrap"
-            >
-              {srcDoc}
-            </motion.pre>
-          ) : (
-            <motion.div
-              key="frame"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-              className="plate rounded-2xl p-2 shadow-plate"
-              style={
-                effectiveMode === 'scroll'
-                  ? { width: '100%', maxWidth: surface === 'desktop' ? '100%' : sz.w + 32 }
-                  : { width: '100%', maxWidth: sz.w + 32 }
-              }
-            >
-              <iframe
-                ref={iframeRef}
-                title="preview"
-                srcDoc={srcDoc}
-                sandbox="allow-scripts"
-                onLoad={syncPreviewMode}
-                style={
-                  effectiveMode === 'scroll'
-                    ? {
-                        width: '100%',
-                        maxWidth: surface === 'desktop' ? '100%' : sz.w,
-                        height: sz.h,
-                        background: 'transparent',
-                        borderRadius: 12,
-                        border: 0,
-                        display: 'block',
-                      }
-                    : {
-                        width: sz.w,
-                        height: sz.h,
-                        background: 'transparent',
-                        borderRadius: 12,
-                        border: 0,
-                        display: 'block',
-                        maxWidth: '100%',
-                      }
-                }
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+        {!srcDocsBySurface ? (
+          <div className="flex-1 grid place-items-center">
+            <PreviewEmpty />
+          </div>
+        ) : showCode ? (
+          <pre className="flex-1 m-4 plate rounded-xl p-4 text-[11px] font-mono leading-relaxed overflow-auto whitespace-pre-wrap min-h-0">
+            {activeSrcDoc}
+          </pre>
+        ) : (
+          <>
+            <div className="relative flex-1 min-h-0 w-full overflow-hidden">
+              {activeSurfaces.map((id) => (
+                <DevicePreviewFrame
+                  key={`${id}-${reloadGen}`}
+                  surface={id}
+                  mode={effectiveMode}
+                  srcDoc={srcDocsBySurface[id]}
+                  setIframeRef={(el) => { iframeRefs.current[id] = el; }}
+                  visible={desktopOnly || surface === id}
+                  constrainToViewport={skillId === 'dashboard'}
+                  lockScroll={desktopOnly}
+                />
+              ))}
+            </div>
+            {desktopOnly && artifact && (
+              <DeckSlideFooter
+                nav={navState}
+                onPrev={() => navigateSlide({ dir: 'prev' })}
+                onNext={() => navigateSlide({ dir: 'next' })}
               />
-            </motion.div>
-          )}
-        </AnimatePresence>
+            )}
+          </>
+        )}
       </div>
 
       <DiffDialog
@@ -436,7 +656,8 @@ function OverflowMenu({ items }: { items: OverflowItem[] }) {
   );
 }
 
-function ModeTabs({ mode, onChange }: { mode: PreviewMode; onChange: (m: PreviewMode | 'auto') => void }) {
+function ModeTabs({ mode, onChange, hidden = false }: { mode: PreviewMode; onChange: (m: PreviewMode | 'auto') => void; hidden?: boolean }) {
+  if (hidden) return null;
   const tabs: { id: PreviewMode; icon: React.ReactNode; label: string }[] = [
     { id: 'scroll',  icon: <ScrollText className="h-3.5 w-3.5" strokeWidth={1.6} />,    label: 'Scroll' },
     { id: 'present', icon: <Presentation className="h-3.5 w-3.5" strokeWidth={1.6} />,  label: 'Slide' },
@@ -462,6 +683,43 @@ function ModeTabs({ mode, onChange }: { mode: PreviewMode; onChange: (m: Preview
   );
 }
 
+function DeckSlideFooter({
+  nav,
+  onPrev,
+  onNext,
+}: {
+  nav: { idx: number; total: number };
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  return (
+    <div className="shrink-0 border-t border-border px-4 py-2.5 flex flex-col items-center gap-2 bg-canvas/50">
+      <span className="text-[12px] tabular-nums text-muted-foreground">
+        Slide {nav.idx + 1} / {nav.total}
+      </span>
+      <div className="flex items-center gap-3 text-[12.5px]">
+        <button
+          type="button"
+          onClick={onPrev}
+          disabled={nav.idx === 0}
+          className="btn-quiet h-7 px-2.5 disabled:opacity-40"
+        >
+          Previous
+        </button>
+        <span className="text-muted-foreground/50 select-none" aria-hidden>|</span>
+        <button
+          type="button"
+          onClick={onNext}
+          disabled={nav.idx >= nav.total - 1}
+          className="btn-quiet h-7 px-2.5 disabled:opacity-40"
+        >
+          Next
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function SlideNav({ nav, onPrev, onNext }: { nav: { idx: number; total: number }; onPrev: () => void; onNext: () => void }) {
   return (
     <div className="flex items-center gap-1 ml-1">
@@ -473,8 +731,8 @@ function SlideNav({ nav, onPrev, onNext }: { nav: { idx: number; total: number }
       >
         <ChevronLeft className="h-4 w-4" />
       </button>
-      <span className="text-[11px] tabular-nums font-mono px-1.5 text-muted-foreground min-w-[44px] text-center">
-        {nav.idx + 1}/{nav.total}
+      <span className="text-[11px] tabular-nums font-mono px-1.5 text-muted-foreground min-w-[72px] text-center">
+        Slide {nav.idx + 1} / {nav.total}
       </span>
       <button
         onClick={onNext}
@@ -526,7 +784,7 @@ function SurfaceTab({
         'h-7 w-7 rounded-md grid place-items-center transition-colors',
         active ? 'bg-primary/10 ring-1 ring-primary/30 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
       )}
-      title={SURFACE_SIZES[id].label}
+      title={PREVIEW_SURFACES[id].label}
     >
       {icon}
     </button>
@@ -545,7 +803,7 @@ function PreviewEmpty() {
       </div>
       <h3 className="font-display italic text-2xl mt-3">Preview waits.</h3>
       <p className="text-[12px] text-muted-foreground mt-1.5 leading-relaxed">
-        Start by sending a prompt.
+        When the model returns an &lt;artifact&gt; block, it lands here in a sandboxed frame.
       </p>
     </motion.div>
   );
