@@ -68,6 +68,15 @@ function isAzureHost(baseUrl: string): boolean {
     || u.includes('.services.ai.azure.com');
 }
 
+// Reasoning models (gpt-5, o1, o3, o4, …) reject the `temperature` param —
+// they only support the default. Omit it for those to avoid 400s.
+function supportsTemperature(model: string): boolean {
+  const m = (model || '').toLowerCase();
+  if (/(^|[^a-z])gpt-5/.test(m)) return false;
+  if (/(^|[^a-z])o[134](-|$|[^a-z0-9])/.test(m)) return false;
+  return true;
+}
+
 /** Foundry "Projects v1" URLs end with /openai/v1/responses or expose the
  *  Responses API. Detect to switch protocol from chat-completions to responses. */
 function looksLikeResponsesEndpoint(endpoint: string): boolean {
@@ -269,6 +278,12 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let bodyJson: Record<string, unknown>;
 
+  // Some models (gpt-5 / o-series reasoning) reject `temperature`. Only send
+  // it when the target model supports it.
+  const temp: Record<string, number> = supportsTemperature(route.model)
+    ? { temperature: temperature ?? 0.7 }
+    : {};
+
   // Pre-process messages: inline text attachments and collect image attachments
   const processedMessages = messages.map((m) => {
     const content = inlineTextAttachments(m.content, m.attachments);
@@ -285,7 +300,11 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
       model: route.model,
       max_tokens: 16384,
       stream: true,
+<<<<<<< Updated upstream
       ...samplingParams(route.model, temperature),
+=======
+      ...temp,
+>>>>>>> Stashed changes
       ...(sys ? { system: sys } : {}),
       messages: rest.map((m) => {
         const imgs = m.images;
@@ -316,7 +335,11 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     bodyJson = {
       model: route.model,
       stream: true,
+<<<<<<< Updated upstream
       ...samplingParams(route.model, temperature),
+=======
+      ...temp,
+>>>>>>> Stashed changes
       ...(sys ? { instructions: sys } : {}),
       input: rest.map((m) => {
         const imgs = m.images;
@@ -361,7 +384,11 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
         }
         return { role: m.role, content: m.content };
       }),
+<<<<<<< Updated upstream
       ...samplingParams(route.model, temperature),
+=======
+      ...temp,
+>>>>>>> Stashed changes
       stream: true,
     };
   } else {
@@ -387,7 +414,11 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
         }
         return { role: m.role, content: m.content };
       }),
+<<<<<<< Updated upstream
       ...samplingParams(route.model, temperature),
+=======
+      ...temp,
+>>>>>>> Stashed changes
       stream: true,
     };
   }
