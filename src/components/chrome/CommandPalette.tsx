@@ -25,7 +25,7 @@ export function CommandPalette() {
   const directions = useCatalog((s) => s.directions);
   const agents = useCatalog((s) => s.agents);
 
-  const setSkill = useStudio((s) => s.setSkill);
+  const switchSkill = useStudio((s) => s.switchSkill);
   const setSystem = useStudio((s) => s.setSystem);
   const setDirection = useStudio((s) => s.setDirection);
   const setAgent = useStudio((s) => s.setAgent);
@@ -68,7 +68,7 @@ export function CommandPalette() {
     skills.forEach((s) => out.push({
       id: 'skill:' + s.id, group: 'Skill', label: s.name, hint: s.blurb,
       icon: <Sparkles className="h-3.5 w-3.5" />,
-      run: () => { setSkill(s.id); setRoute('studio'); },
+      run: () => { void switchSkill(s.id); setRoute('studio'); },
     }));
     designSystems.forEach((d) => out.push({
       id: 'system:' + d.id, group: 'System', label: d.name, hint: d.vibe,
@@ -91,7 +91,7 @@ export function CommandPalette() {
       run: () => { setAgent('byok'); setRoute('studio'); },
     });
     return out;
-  }, [skills, designSystems, directions, agents, theme, setRoute, setSkill, setSystem, setDirection, setAgent, setTheme]);
+  }, [skills, designSystems, directions, agents, theme, setRoute, switchSkill, setSystem, setDirection, setAgent, setTheme]);
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();

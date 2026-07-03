@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import {
   composeSystemPrompt, extractArtifact, extractQuestionForm,
-  stripArtifact, inferPhase,
+  stripArtifact, inferPhase, usesDirectArtifactGeneration,
 } from '../src/lib/prompt';
 import { listSkills, getSkill } from '../electron/library';
 
@@ -29,6 +29,33 @@ describe('prompt composer', () => {
     });
     expect(r.system).toContain('# Active design system: Ember');
     expect(r.system).toContain('--bg: oklch(0.18 0.02 264);');
+  });
+
+  it('adds web quality bar for web skills', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'web-prototype', name: 'Web Prototype', category: 'web', emoji: '🌐', blurb: 'Site.' },
+    });
+    expect(r.system).toContain('Web prototype quality bar');
+    expect(r.system).toContain('Do NOT use Tailwind CDN');
+    expect(r.system).toContain('Never emit <question-form>');
+  });
+
+  it('adds pricing quality bar for pricing-page skill', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'pricing-page', name: 'Pricing Page', category: 'web', emoji: '💵', blurb: 'Plans.' },
+    });
+    expect(r.system).toContain('Pricing page quality bar');
+    expect(r.system).toContain('Never emit <question-form>');
+    expect(r.system).toContain('Free');
+    expect(r.system).toContain('Standard');
+    expect(r.system).toContain('Premium');
+    expect(r.system).not.toContain('Required sections (minimum 6');
+  });
+
+  it('flags direct-generate skills', () => {
+    expect(usesDirectArtifactGeneration({ id: 'pricing-page' })).toBe(true);
+    expect(usesDirectArtifactGeneration({ id: 'web-prototype' })).toBe(true);
+    expect(usesDirectArtifactGeneration({ id: 'docs-portal' })).toBe(false);
   });
 
   it('includes brand spec when provided', () => {
@@ -108,8 +135,12 @@ describe('inferPhase', () => {
     expect(inferPhase('<artifact>... lots ...<footer>©', 100)).toBe('Closing the footer…');
   });
 
-  it('detects token tuning phase', () => {
-    expect(inferPhase('<artifact><style>:root { --bg: black; }', 100)).toBe('Tuning tokens…');
+  it('detects pricing plan card phase', () => {
+    expect(inferPhase('<artifact><section class="plan-card">', 100)).toBe('Building plan cards…');
+  });
+
+  it('detects FAQ phase', () => {
+    expect(inferPhase('<artifact><details><summary>', 100)).toBe('Writing FAQ…');
   });
 });
 
@@ -288,6 +319,7 @@ describe('composeSystemPrompt signature stability', () => {
       'extractQuestionForm',
       'inferPhase',
       'stripArtifact',
+      'usesDirectArtifactGeneration',
     ].sort();
     expect(exportedKeys).toEqual(expectedExports);
   });

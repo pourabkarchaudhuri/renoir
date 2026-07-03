@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { ArrowRight, Sparkles, Zap, FolderOpen, ImageIcon } from 'lucide-react';
 import { iconForSkill } from '@/lib/skill-icons';
 import { useCatalog, useStudio, useUI } from '@/lib/store';
+import { loadSession } from '@/lib/skill-sessions';
 import type { ProjectRecord } from '@/types/global';
 import { cn } from '@/lib/cn';
 
@@ -41,7 +42,12 @@ export function Home() {
               {projects.slice(0, 6).map((p) => (
                 <button
                   key={p.id}
-                  onClick={() => { setProject(p); setRoute('studio'); }}
+                  onClick={() => {
+                    const skill = p.skillId || 'web-prototype';
+                    setProject(loadSession(p, skill));
+                    setSkill(skill);
+                    setRoute('studio');
+                  }}
                   className="plate rounded-xl p-4 text-left group hover:-translate-y-[1px] transition-transform"
                 >
                   <div className="flex items-center gap-3">

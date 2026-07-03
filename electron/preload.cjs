@@ -10,6 +10,7 @@ const C = {
   skillsList:        'renoir:skills:list',
   skillsPrimer:      'renoir:skills:primer',
   designSystemsList: 'renoir:design:list',
+  designSystemGet:   'renoir:design:get',
   promptsList:       'renoir:prompts:list',
   directionsList:    'renoir:directions:list',
 
@@ -87,6 +88,7 @@ contextBridge.exposeInMainWorld('renoir', {
   listSkills:           () => ipcRenderer.invoke(C.skillsList),
   getSkillPrimer:       (id) => ipcRenderer.invoke(C.skillsPrimer, id),
   listDesignSystems:    () => ipcRenderer.invoke(C.designSystemsList),
+  getDesignSystem:      (id) => ipcRenderer.invoke(C.designSystemGet, id),
   listPromptTemplates:  () => ipcRenderer.invoke(C.promptsList),
   listVisualDirections: () => ipcRenderer.invoke(C.directionsList),
 

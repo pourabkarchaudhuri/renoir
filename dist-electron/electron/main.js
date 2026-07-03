@@ -3,13 +3,13 @@ import path from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-import { loadEnv, azureConfig, azureConfigured } from './env.js';
+import { loadEnv, azureConfig, azureConfigured, azureImageConfigured } from './env.js';
 import { store } from './store.js';
 import { secrets } from './secrets.js';
 import { startChat, cancelChat, describeRoute } from './llm.js';
 import { generateImage } from './image.js';
 import { batchGenerateImages } from './image-batch.js';
-import { listSkills, getSkill, listDesignSystems, listPromptTemplates, listVisualDirections, } from './library.js';
+import { listSkills, getSkill, listDesignSystems, listPromptTemplates, listVisualDirections, getDesignSystem, } from './library.js';
 import { openWorkspaceFolder, writeArtifact, migrateWorkspace, workspaceRoot } from './workspace.js';
 import { detectAgents, invokeAgent, cancelAgent } from './agents.js';
 import { loadSkillsFromDisk } from './skill-loader.js';
@@ -178,6 +178,15 @@ function registerIpc() {
         }));
         return [...builtIn, ...custom];
     });
+    ipcMain.handle('renoir:design:get', (_e, id) => {
+        const builtIn = getDesignSystem(id);
+        if (builtIn)
+            return { id: builtIn.id, name: builtIn.name, tokens: builtIn.tokens };
+        const custom = customCatalog.listSystems().find((s) => s.id === id);
+        if (custom)
+            return { id: custom.id, name: custom.name, tokens: custom.tokens };
+        return null;
+    });
     ipcMain.handle('renoir:prompts:list', () => listPromptTemplates());
     ipcMain.handle('renoir:directions:list', () => {
         const builtIn = listVisualDirections();
@@ -236,8 +245,8 @@ function registerIpc() {
             }
         }
         // Validate Azure is configured
-        if (!azureConfigured()) {
-            return { ok: false, results: req.items.map((i) => ({ id: i.id || '', ok: false, error: 'Azure is not configured' })) };
+        if (!azureImageConfigured()) {
+            return { ok: false, results: req.items.map((i) => ({ id: i.id || '', ok: false, error: 'Azure image is not configured' })) };
         }
         return batchGenerateImages(req);
     });

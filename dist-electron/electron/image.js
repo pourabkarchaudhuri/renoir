@@ -2,7 +2,7 @@
 // (loaded by env.ts) — never exposed to renderer.
 import path from 'node:path';
 import fs from 'node:fs';
-import { azureConfig, azureConfigured } from './env.js';
+import { azureConfig, azureImageConfigured } from './env.js';
 import { deriveAzureUrl } from './azure-url.js';
 import { projectDir, workspaceRoot } from './workspace.js';
 function workspaceDir(projectId) {
@@ -16,11 +16,11 @@ function safeName(prompt) {
     return `${base}-${Date.now()}`;
 }
 export async function editImage(req) {
-    if (!azureConfigured())
+    if (!azureImageConfigured())
         return { ok: false, error: 'AZURE_NOT_CONFIGURED' };
     const cfg = azureConfig();
     const url = deriveAzureUrl({
-        endpoint: cfg.endpoint, apiVersion: cfg.apiVersion,
+        endpoint: cfg.imageEndpoint, apiVersion: cfg.apiVersion,
         deployment: cfg.imageModel, op: 'images/edits',
     });
     if (!url)
@@ -52,8 +52,8 @@ export async function editImage(req) {
             method: 'POST',
             headers: {
                 'Content-Type': `multipart/form-data; boundary=${boundary}`,
-                'api-key': cfg.apiKey,
-                Authorization: `Bearer ${cfg.apiKey}`,
+                'api-key': cfg.imageApiKey,
+                Authorization: `Bearer ${cfg.imageApiKey}`,
             },
             body,
         });
@@ -98,24 +98,26 @@ export async function editImage(req) {
     return { ok: true, images: ok };
 }
 export async function generateImage(req) {
-    if (!azureConfigured()) {
+    if (!azureImageConfigured()) {
         return { ok: false, error: 'AZURE_NOT_CONFIGURED' };
     }
     const cfg = azureConfig();
     const url = deriveAzureUrl({
-        endpoint: cfg.endpoint,
+        endpoint: cfg.imageEndpoint,
         apiVersion: cfg.apiVersion,
         deployment: cfg.imageModel,
         op: 'images/generations',
     });
     if (!url) {
-        return { ok: false, error: `Could not derive image URL from endpoint "${cfg.endpoint}"` };
+        return { ok: false, error: `Could not derive image URL from endpoint "${cfg.imageEndpoint}"` };
     }
     const body = {
         model: cfg.imageModel,
         prompt: req.prompt,
         size: req.size ?? '1024x1024',
         n: Math.max(1, Math.min(4, req.n ?? 1)),
+        output_format: 'png',
+        output_compression: 100,
     };
     if (req.quality)
         body.quality = req.quality;
@@ -125,8 +127,7 @@ export async function generateImage(req) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'api-key': cfg.apiKey,
-                Authorization: `Bearer ${cfg.apiKey}`, // works for v1 Foundry endpoints
+                Authorization: `Bearer ${cfg.imageApiKey}`,
             },
             body: JSON.stringify(body),
         });

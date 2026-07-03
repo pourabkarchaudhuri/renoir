@@ -13,6 +13,7 @@ import { Gallery } from '@/views/Gallery';
 import { Settings } from '@/views/Settings';
 import { Media } from '@/views/Media';
 import { AnimatePresence, motion } from 'framer-motion';
+import { loadSession, projectHasSkillWork } from '@/lib/skill-sessions';
 
 export default function App() {
   const route = useUI((s) => s.route);
@@ -27,7 +28,14 @@ export default function App() {
     void window.renoir.listProjects().then((projects) => {
       if (cancelled) return;
       if (projects.length && !useStudio.getState().project) {
-        useStudio.getState().setProject(projects[0]);
+        const skill = useStudio.getState().selectedSkillId || projects[0].skillId || 'web-prototype';
+        const match = projects.find((p) => projectHasSkillWork(p, skill));
+        if (match) {
+          useStudio.getState().setProject(loadSession(match, skill));
+          useStudio.getState().setSkill(skill);
+        } else {
+          useStudio.getState().setSkill(skill);
+        }
       }
     });
     return () => { cancelled = true; };

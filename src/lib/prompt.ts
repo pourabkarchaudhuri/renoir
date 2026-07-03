@@ -262,6 +262,116 @@ Background patterns:
 - Subtle topography: layered conic-gradients at very low opacity for organic feel.
 `;
 
+/** Skills that skip the turn-1 question form and generate the artifact immediately. */
+export function usesDirectArtifactGeneration(skill?: { id?: string } | null): boolean {
+  return skill?.id === 'pricing-page' || skill?.id === 'web-prototype';
+}
+
+const DIRECT_ARTIFACT_OVERRIDE = `## Turn 1 (overrides FRAME rule 6)
+- Never emit <question-form>. Do not ask clarifying questions.
+- On the first user message, output the complete <artifact> immediately.
+- If audience, tone, product name, or tier details are missing, infer sensible defaults from the brief — do not stop to collect answers.`;
+
+/** Overrides conflicting FRAME guidance when generating client-facing web pages. */
+const WEB_PROTOTYPE_QUALITY = `# Web prototype quality bar (overrides conflicting rules above)
+
+This is a client deliverable — a polished, shippable single-page website. Apply these rules even if they contradict earlier sections:
+
+${DIRECT_ARTIFACT_OVERRIDE}
+
+## Stack
+- Do NOT use Tailwind CDN. One <style> block + CSS custom properties only.
+- Map injected design tokens to :root: --bg, --surface, --fg, --muted, --accent, --accent2. Derive --border: color-mix(in oklch, var(--muted) 30%, transparent).
+- Serif display for h1–h3 (from design system font stack). Sans body. Mono for prices/stats/eyebrows.
+- Sticky frosted topnav, container ~1120px, 8pt spacing, 64–96px section padding.
+
+## Required sections (minimum 6 — no wireframes)
+1. Hero — specific headline from brief + subhead + primary CTA + visual (inline SVG or .ph-img placeholder).
+2. Services/features — 3–6 cards with inline SVG icons (not emoji), domain-specific copy.
+3. Gallery/showcase — grid of 3–6 items relevant to the business.
+4. Social proof — quote, hours/location, or logo strip (only if brief provides info).
+5. Booking/pricing CTA band — clear next step.
+6. Footer — business name, nav, contact/hours.
+
+## Banned (P0)
+- Sparse pages (nav + headline + one button on empty canvas).
+- Gradient orbs, purple/violet mesh backgrounds, generic AI-startup layouts.
+- Invented metrics, fake testimonials, stock photo URLs, lorem ipsum, "Feature One/Two".
+- Emoji icons. Bullet-list nav as the entire page.
+- Raw hex outside :root. Accent used more than 2× per screen.
+
+## Polish
+- Single theme matching the design system is fine (dual light/dark optional).
+- Headlines must name the client's business — never generic "Welcome".
+- Hover/focus on all interactive elements. Mobile grid collapse at ≤920px.
+- **Header/nav:** flex row with wrap; logo + links + CTA must never overflow. Use \`flex-wrap: wrap\`, \`min-width: 0\`, \`box-sizing: border-box\` on header children. CTA label ≤12 chars on narrow screens ("Book" not "Book online" if tight). Links shrink or wrap to a second row below 640px — never clip off-screen.
+- Self-check: Would you invoice a client for this? If not, add sections and polish until yes.`;
+
+/** Overrides conflicting FRAME guidance when generating a pricing page. */
+const PRICING_PAGE_QUALITY = `# Pricing page quality bar (overrides conflicting rules above)
+
+This is a client deliverable — a polished, shippable **pricing page** (not a full landing site). Apply these rules even if they contradict earlier sections:
+
+${DIRECT_ARTIFACT_OVERRIDE}
+- When tier names, prices, or feature bullets are unspecified, use the **Free / Standard / Premium** defaults below and write domain-specific copy (e.g. salon appointments, SaaS seats) from whatever context the user gave.
+
+## Stack
+- Do NOT use Tailwind CDN. One <style> block + CSS custom properties only.
+- Map injected design tokens to :root: --bg, --surface, --surface2, --fg, --muted, --accent, --accent2. Derive --border: color-mix(in oklch, var(--muted) 22%, transparent).
+- Match the active design system (e.g. Ember: warm ink background, amber accent sparingly on the recommended tier only).
+- Serif display for tier names (h1–h2 scale). Sans for body, bullets, and price suffixes. Mono optional for "$" amounts.
+- Page max-width ~1120px centered. 8pt spacing rhythm. Cards use border-radius from DS (≈12–16px).
+
+## Layout (Claude-inspired three-card row)
+1. **Compact header** — product logo/wordmark + 3–5 nav links + one accent CTA (≤12 chars on mobile).
+2. **Hero** — "Pricing" or "[Product] pricing" + one-line subhead. Optional **monthly / annual** pill toggle (CSS-only; swap displayed prices).
+3. **Plan cards (required)** — exactly **3 equal columns** on desktop (≥1024px), **stack to 1 column** on ≤1024px (covers tablet 820px and phone 390px slide previews):
+   - Dark --surface cards on --bg canvas, 1px --border, subtle hover lift (translateY(-2px), stronger border).
+   - Top: small inline SVG icon (abstract mark — not emoji), unique per tier.
+   - Tier name in large serif. Subtitle line under the name.
+   - **Price** large and bold; billing note smaller (--muted).
+   - Bulleted features with ✓ checkmarks (CSS or inline SVG).
+   - Full-width CTA button at card bottom (high contrast: light button on dark card OR accent fill — pick one system-wide).
+   - **Standard** (middle) is the recommended tier: subtle scale(1.02–1.04), accent top border or "Popular" badge — accent used here only.
+4. **Comparison table** — feature rows × 3 tier columns; ✓ / — / text cells; sticky header; group rows (Core, Collaboration, Support…).
+5. **FAQ** — 4–6 items using <details><summary> (no JS).
+6. **Footer** — slim: product name, links, copyright.
+
+## Default tiers (use unless brief / # Brief answers override)
+When the user does NOT specify custom tier names, prices, or feature lists, use **Free**, **Standard**, **Premium** with this structure — adapt product name and feature wording to the brief (e.g. salon, SaaS, app):
+
+### Free
+- Subtitle: "Try [Product]" or "Get started"
+- Price: **$0** — note: "Free for everyone"
+- Features (6–10 bullets): core access — chat/web/mobile, basic creation, limited usage, essential integrations. Wording must fit the product domain.
+
+### Standard (recommended / middle card)
+- Subtitle: "For everyday productivity" (or domain equivalent)
+- Price: **$17**/mo with annual discount note ("Per month with annual subscription — $200 billed up front. $20 if billed monthly.") OR adapt to product.
+- Lead-in: "Everything in Free, plus:"
+- Features: more usage, premium modules, projects/workspaces, research/advanced tools, priority models — domain-specific.
+
+### Premium
+- Subtitle: "Get the most out of [Product]"
+- Price: **From $100**/mo
+- Lead-in: "Everything in Standard, plus:"
+- Features: 5×–20× usage, higher output limits, early access, priority at peak times.
+
+If \`tiers\` or \`product\` appears in brief answers with custom values, **replace defaults entirely** with the user's tiers.
+
+## Banned (P0)
+- Full landing-page sections (hero galleries, team grids, unrelated marketing fluff).
+- Tier names "Pro", "Max", "Starter/Growth/Enterprise" unless the user asked for them.
+- Sparse page (title + one card). Gradient orbs, purple AI-startup aesthetic, lorem ipsum.
+- Emoji icons. Fake "$X/month" placeholders. Invented enterprise logos.
+
+## Polish
+- Dark theme from design tokens is preferred; light optional if DS is light-first.
+- Slide preview viewports are **390×844** (phone) and **820×1180** (tablet) — no horizontal overflow; each section must fit one screen without clipping.
+- All prices plausible for the product category. CTAs action-specific ("Get Standard", "Start free").
+- Toggle animates price labels. Table scrolls horizontally on narrow screens if needed.
+- Self-check: Does this look like a premium pricing page you'd ship? If not, enrich copy and comparison rows until yes.`;
+
 export function composeSystemPrompt(opts: {
   skill?: SkillSummary;
   primer?: string;
@@ -286,10 +396,14 @@ export function composeSystemPrompt(opts: {
     lines.push(`Vibe: ${opts.designSystem.vibe}`);
     lines.push(`Font stack: ${opts.designSystem.font}`);
     if (opts.designTokens?.length) {
-      lines.push('Tokens:');
+      lines.push('Bind these exact values to :root CSS variables:');
       for (const t of opts.designTokens) {
         lines.push(`  --${t.name}: ${t.value};`);
       }
+      lines.push('Derive --border: color-mix(in oklch, var(--muted) 30%, transparent);');
+      lines.push('Use --accent2 from tokens for secondary highlights if present.');
+    } else {
+      lines.push('Map palette swatches to --bg, --surface, --fg, --muted, --accent tokens.');
     }
   }
 
@@ -321,6 +435,14 @@ export function composeSystemPrompt(opts: {
       if (!v) continue;
       lines.push(`- ${k}: ${v}`);
     }
+  }
+
+  if (opts.skill?.id === 'pricing-page') {
+    lines.push('');
+    lines.push(PRICING_PAGE_QUALITY);
+  } else if (opts.skill?.category === 'web') {
+    lines.push('');
+    lines.push(WEB_PROTOTYPE_QUALITY);
   }
 
   return { system: lines.join('\n') };
@@ -367,6 +489,8 @@ export function inferPhase(text: string, elapsedMs: number): string {
   if (open) {
     const tail = open[1].slice(-600).toLowerCase();
     if (/<\/?footer/.test(tail))                  return 'Closing the footer…';
+    if (/pricing|plan-card|tier-card|compare|feature-row/i.test(tail)) return 'Building plan cards…';
+    if (/<details|<summary|faq/i.test(tail))     return 'Writing FAQ…';
     if (/<\/?form/.test(tail))                    return 'Building forms…';
     if (/<table|grid-cols|<\/?ul|<\/?ol/.test(tail)) return 'Laying out the grid…';
     if (/<button|<a /.test(tail))                 return 'Placing CTAs…';

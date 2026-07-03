@@ -56,32 +56,38 @@ export function PreviewPane({
   // iframe (which used to break the layout briefly mid-switch).
   const srcDoc = useMemo(() => (baseHtml ? wrapWithBridge(baseHtml) : null), [baseHtml]);
 
-  const [contentHeight, setContentHeight] = useState<number | null>(null);
-  // Listen for nav-state + size messages from the iframe bridge.
+  // Listen for nav-state messages from the iframe bridge.
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       const d = e.data;
       if (d?.type === 'renoir:nav-state') setNavState({ idx: d.idx ?? 0, total: d.total ?? 1 });
-      else if (d?.type === 'renoir:size') {
-        const h = Math.min(40_000, Math.max(400, Number(d.height) || 0));
-        setContentHeight(h);
-      }
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
   }, []);
 
+  const post = (msg: unknown) =>
+    iframeRef.current?.contentWindow?.postMessage(msg, '*');
+
+  const syncPreviewMode = () => {
+    post({ type: 'renoir:set-mode', mode: effectiveMode });
+    post({ type: 'renoir:probe' });
+  };
+
+  const navSlide = (dir: 'prev' | 'next' | { idx: number }) => {
+    if (effectiveMode !== 'present') {
+      post({ type: 'renoir:set-mode', mode: 'present' });
+    }
+    if (typeof dir === 'object') post({ type: 'renoir:nav', idx: dir.idx });
+    else post({ type: 'renoir:nav', dir });
+  };
+
   // Tell the iframe what mode is active whenever it (re)loads or mode changes.
   useEffect(() => {
     if (!srcDoc) return;
-    const id = setTimeout(() => {
-      iframeRef.current?.contentWindow?.postMessage({ type: 'renoir:set-mode', mode: effectiveMode }, '*');
-    }, 100);
+    const id = setTimeout(syncPreviewMode, 50);
     return () => clearTimeout(id);
-  }, [srcDoc, effectiveMode]);
-
-  const post = (msg: unknown) =>
-    iframeRef.current?.contentWindow?.postMessage(msg, '*');
+  }, [srcDoc, effectiveMode, surface]);
 
   // Keyboard nav for present/pages
   useEffect(() => {
@@ -90,10 +96,10 @@ export function PreviewPane({
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName?.toLowerCase();
       if (tag === 'input' || tag === 'textarea' || (t && (t as any).isContentEditable)) return;
-      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown')                { e.preventDefault(); post({ type: 'renoir:nav', dir: 'next' }); }
-      else if (e.key === 'ArrowLeft' || e.key === 'PageUp')                               { e.preventDefault(); post({ type: 'renoir:nav', dir: 'prev' }); }
-      else if (e.key === 'Home')                                                          { e.preventDefault(); post({ type: 'renoir:nav', idx: 0 }); }
-      else if (e.key === 'End')                                                           { e.preventDefault(); post({ type: 'renoir:nav', idx: 999 }); }
+      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown')                { e.preventDefault(); navSlide('next'); }
+      else if (e.key === 'ArrowLeft' || e.key === 'PageUp')                               { e.preventDefault(); navSlide('prev'); }
+      else if (e.key === 'Home')                                                          { e.preventDefault(); navSlide({ idx: 0 }); }
+      else if (e.key === 'End')                                                           { e.preventDefault(); navSlide({ idx: 999 }); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -225,18 +231,14 @@ export function PreviewPane({
           </span>
         )}
         <ModeTabs mode={effectiveMode} onChange={setModeOverride} />
-        {effectiveMode === 'scroll' && (
-          <>
-            <SurfaceTab id="phone"   surface={surface} setSurface={setSurface} icon={<Smartphone className="h-3.5 w-3.5" strokeWidth={1.6} />} />
-            <SurfaceTab id="tablet"  surface={surface} setSurface={setSurface} icon={<Tablet className="h-3.5 w-3.5" strokeWidth={1.6} />} />
-            <SurfaceTab id="desktop" surface={surface} setSurface={setSurface} icon={<Monitor className="h-3.5 w-3.5" strokeWidth={1.6} />} />
-            <span className="ml-1 text-[10px] uppercase tracking-[0.22em] text-muted-foreground/70">
-              {sz.w}×{sz.h}
-            </span>
-          </>
-        )}
+        <SurfaceTab id="phone"   surface={surface} setSurface={setSurface} icon={<Smartphone className="h-3.5 w-3.5" strokeWidth={1.6} />} />
+        <SurfaceTab id="tablet"  surface={surface} setSurface={setSurface} icon={<Tablet className="h-3.5 w-3.5" strokeWidth={1.6} />} />
+        <SurfaceTab id="desktop" surface={surface} setSurface={setSurface} icon={<Monitor className="h-3.5 w-3.5" strokeWidth={1.6} />} />
+        <span className="ml-1 text-[10px] uppercase tracking-[0.22em] text-muted-foreground/70">
+          {sz.w}×{sz.h}
+        </span>
         {effectiveMode === 'present' && (
-          <SlideNav nav={navState} onPrev={() => post({ type: 'renoir:nav', dir: 'prev' })} onNext={() => post({ type: 'renoir:nav', dir: 'next' })} />
+          <SlideNav nav={navState} onPrev={() => navSlide('prev')} onNext={() => navSlide('next')} />
         )}
         <div className="ml-auto flex items-center gap-1.5">
           {artifact && <LintBadge html={baseHtml} />}
@@ -284,10 +286,8 @@ export function PreviewPane({
               className="plate rounded-2xl p-2 shadow-plate"
               style={
                 effectiveMode === 'scroll'
-                  ? { width: '100%', maxWidth: sz.w === 390 ? 420 : sz.w === 820 ? 860 : '100%' }
-                  : effectiveMode === 'present'
-                    ? { width: '100%', aspectRatio: '16 / 9' }
-                    : { width: '100%', maxWidth: 960, height: '100%', maxHeight: '80vh' }
+                  ? { width: '100%', maxWidth: surface === 'desktop' ? '100%' : sz.w + 32 }
+                  : { width: '100%', maxWidth: sz.w + 32 }
               }
             >
               <iframe
@@ -295,19 +295,27 @@ export function PreviewPane({
                 title="preview"
                 srcDoc={srcDoc}
                 sandbox="allow-scripts"
+                onLoad={syncPreviewMode}
                 style={
                   effectiveMode === 'scroll'
                     ? {
                         width: '100%',
-                        // Auto-size to content height when bridge reports it,
-                        // otherwise fall back to the surface's nominal height.
-                        height: contentHeight ?? sz.h,
-                        background: 'white',
+                        maxWidth: surface === 'desktop' ? '100%' : sz.w,
+                        height: sz.h,
+                        background: 'transparent',
                         borderRadius: 12,
                         border: 0,
                         display: 'block',
                       }
-                    : { width: '100%', height: '100%', background: 'white', borderRadius: 12, border: 0 }
+                    : {
+                        width: sz.w,
+                        height: sz.h,
+                        background: 'transparent',
+                        borderRadius: 12,
+                        border: 0,
+                        display: 'block',
+                        maxWidth: '100%',
+                      }
                 }
               />
             </motion.div>
@@ -537,7 +545,7 @@ function PreviewEmpty() {
       </div>
       <h3 className="font-display italic text-2xl mt-3">Preview waits.</h3>
       <p className="text-[12px] text-muted-foreground mt-1.5 leading-relaxed">
-        When the model returns an &lt;artifact&gt; block, it lands here in a sandboxed frame.
+        Start by sending a prompt.
       </p>
     </motion.div>
   );

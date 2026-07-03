@@ -161,18 +161,37 @@ describe('NAV_BRIDGE present mode CSS', () => {
   it('hides in-artifact navigation buttons in present mode', () => {
     expect(NAV_BRIDGE).toContain('.prev-btn,.next-btn,.slide-controls,.navigation{display:none!important;}');
   });
+
+  it('does not force a white background in present mode', () => {
+    expect(NAV_BRIDGE).not.toContain('background:white');
+  });
+
+  it('pins footer and reserves chrome space on the last slide', () => {
+    expect(NAV_BRIDGE).toContain('renoir-footer-fixed');
+    expect(NAV_BRIDGE).toContain('--renoir-chrome-top');
+    expect(NAV_BRIDGE).toContain('--renoir-chrome-bottom');
+    expect(NAV_BRIDGE).toContain('function measureChrome()');
+  });
+
+  it('stacks grids and scales slides to fit on phone/tablet', () => {
+    expect(NAV_BRIDGE).toContain('function fitActiveSlide()');
+    expect(NAV_BRIDGE).toContain('function fitSlide(');
+    expect(NAV_BRIDGE).toContain('root.style.zoom');
+    expect(NAV_BRIDGE).toContain('data-renoir-fit-root');
+    expect(NAV_BRIDGE).toContain('overflow:hidden!important');
+    expect(NAV_BRIDGE).toContain('repeat(3,minmax(0,1fr))');
+    expect(NAV_BRIDGE).toContain('@media(max-width:480px)');
+  });
 });
 
-describe('NAV_BRIDGE reportSize mode guard', () => {
-  it('contains a mode guard checking activeMode before posting size', () => {
-    // The reportSize function should check activeMode !== 'scroll' and return early
-    expect(NAV_BRIDGE).toContain("activeMode !== 'scroll'");
-    // Verify the guard is inside the reportSize function
-    const reportSizeMatch = NAV_BRIDGE.match(/function reportSize\(\)\s*\{([\s\S]*?)\n  \}/);
-    expect(reportSizeMatch).not.toBeNull();
-    const reportSizeBody = reportSizeMatch![1];
-    expect(reportSizeBody).toContain("activeMode !== 'scroll'");
-    expect(reportSizeBody).toContain('return');
+describe('NAV_BRIDGE scroll mode', () => {
+  it('scrolls via html and syncs full document extent', () => {
+    expect(NAV_BRIDGE).toContain('overflow-y:auto!important');
+    expect(NAV_BRIDGE).toContain('function syncScrollExtent()');
+    expect(NAV_BRIDGE).toContain('function measureStackedHeight()');
+    expect(NAV_BRIDGE).toContain('__renoir_scroll_tail');
+    expect(NAV_BRIDGE).not.toContain('useOuterScroll');
+    expect(NAV_BRIDGE).not.toContain("type: 'renoir:wheel'");
   });
 });
 
@@ -281,5 +300,97 @@ describe('Property-based tests', () => {
         { numRuns: 200 },
       );
     });
+  });
+});
+
+describe('scroll mode integration (jsdom)', () => {
+  const salonLikeHtml = `<!doctype html><html><head><style>
+    html,body{margin:0;overflow:hidden;height:100vh}
+    main{height:100vh;overflow:hidden}
+    section{position:absolute;inset:0;width:100%;height:100vh;overflow:hidden}
+    section h1{margin:0;padding:2rem}
+  </style></head><body>
+  <header style="height:64px">Sunny Snips nav</header>
+  <main>
+    <section id="hero"><h1>Hero</h1><div style="height:600px">hero body</div></section>
+    <section id="services"><h1>Services</h1><div style="height:500px">cards</div></section>
+    <section id="gallery"><h1>Gallery</h1><div style="height:400px">grid</div></section>
+    <section id="team"><h1>Team</h1></section>
+    <section id="cta"><h1>Book</h1></section>
+    <section id="visit"><h1>Visit</h1></section>
+  </main>
+  <footer style="height:120px">Footer</footer>
+  </body></html>`;
+
+  it('stacks all sections vertically in scroll mode (full page height)', async () => {
+    const { JSDOM } = await import('jsdom');
+    const src = wrapWithBridge(salonLikeHtml);
+    const dom = new JSDOM(src, { runScripts: 'dangerously', pretendToBeVisual: true });
+    const win = dom.window;
+    const heights: number[] = [];
+    win.parent = {
+      postMessage(data: { type?: string; height?: number }) {
+        if (data?.type === 'renoir:size' && data.height) heights.push(data.height);
+      },
+    } as unknown as Window;
+
+    await new Promise<void>((r) => {
+      if (win.document.readyState === 'complete') r();
+      else win.addEventListener('load', () => r());
+    });
+
+    win.postMessage({ type: 'renoir:set-mode', mode: 'scroll' }, '*');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(win.document.body.getAttribute('data-renoir-mode')).toBe('scroll');
+
+    const sections = Array.from(win.document.querySelectorAll('main > section'));
+    expect(sections.length).toBe(6);
+
+    const positions = sections.map((s) => win.getComputedStyle(s as Element).position);
+    expect(positions.every((p) => p === 'relative' || p === 'static')).toBe(true);
+
+    const transforms = sections.map((s) => (s as HTMLElement).style.transform);
+    expect(transforms.every((t) => !t || t === 'none')).toBe(true);
+
+    const modeStyle = win.document.getElementById('__renoir_mode_style');
+    expect(modeStyle?.textContent).toContain('position:relative!important');
+
+    dom.window.close();
+  });
+
+  it('recovers full scroll height after present mode', async () => {
+    const { JSDOM } = await import('jsdom');
+    const src = wrapWithBridge(salonLikeHtml);
+    const dom = new JSDOM(src, { runScripts: 'dangerously', pretendToBeVisual: true });
+    const win = dom.window;
+    const heights: number[] = [];
+    win.parent = {
+      postMessage(data: { type?: string; height?: number }) {
+        if (data?.type === 'renoir:size' && data.height) heights.push(data.height);
+      },
+    } as unknown as Window;
+
+    await new Promise<void>((r) => {
+      if (win.document.readyState === 'complete') r();
+      else win.addEventListener('load', () => r());
+    });
+
+    win.postMessage({ type: 'renoir:set-mode', mode: 'present' }, '*');
+    await new Promise((r) => setTimeout(r, 30));
+    win.postMessage({ type: 'renoir:set-mode', mode: 'scroll' }, '*');
+    win.postMessage({ type: 'renoir:probe' }, '*');
+    await new Promise((r) => setTimeout(r, 900));
+
+    const footer = win.document.querySelector('footer') as HTMLElement;
+    expect(footer?.style.display).not.toBe('none');
+
+    const sections = Array.from(win.document.querySelectorAll('main > section'));
+    expect(sections.every((s) => {
+      const pos = win.getComputedStyle(s as Element).position;
+      return pos === 'relative' || pos === 'static';
+    })).toBe(true);
+
+    dom.window.close();
   });
 });

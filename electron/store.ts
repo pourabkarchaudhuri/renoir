@@ -4,6 +4,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { app } from 'electron';
+import { syncActiveSession } from '../shared/skill-sessions.js';
 
 type State = {
   byok: {
@@ -23,6 +24,12 @@ export interface ArtifactVersion {
   createdAt: string;
 }
 
+export interface SkillSession {
+  conversation: { role: 'user' | 'assistant' | 'system'; content: string; ts: string }[];
+  versions?: ArtifactVersion[];
+  activeVersionId?: string;
+}
+
 export interface ProjectRecord {
   id: string;
   name: string;
@@ -39,6 +46,8 @@ export interface ProjectRecord {
   /** When set, the preview should render this version even if a newer
    *  assistant version exists. Cleared on the next assistant turn. */
   activeVersionId?: string;
+  /** Per-skill chat + version history within one study. */
+  skillSessions?: Record<string, SkillSession>;
 }
 
 const DEFAULT: State = {
@@ -95,10 +104,11 @@ export const store = {
     return load().projects.find((p) => p.id === id);
   },
   upsertProject(record: ProjectRecord): void {
+    const synced = syncActiveSession(record, record.skillId || 'web-prototype');
     const s = load();
-    const idx = s.projects.findIndex((p) => p.id === record.id);
-    if (idx >= 0) s.projects[idx] = record;
-    else s.projects.push(record);
+    const idx = s.projects.findIndex((p) => p.id === synced.id);
+    if (idx >= 0) s.projects[idx] = synced;
+    else s.projects.push(synced);
     flush();
   },
   deleteProject(id: string): void {

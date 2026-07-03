@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="ember" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f97316"/>
+      <stop offset="50%" stop-color="#ef4444"/>
+      <stop offset="100%" stop-color="#c026d3"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="48" fill="#0c0e14"/>
+  <!-- Abstract R brushstroke -->
+  <path d="M88 184 C88 184 90 100 110 80 C130 60 158 65 163 88 C168 111 140 120 125 125 C110 130 148 135 158 155 C168 175 173 195 173 195" 
+        stroke="url(#ember)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- Sparkle -->
+  <path d="M192 58 L195 66 L203 69 L195 72 L192 80 L189 72 L181 69 L189 66 Z" fill="#f97316" opacity="0.9"/>
+</svg>

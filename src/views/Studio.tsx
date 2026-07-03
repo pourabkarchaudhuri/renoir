@@ -4,7 +4,7 @@ import { ChatPane } from '@/components/studio/ChatPane';
 import { PreviewPane } from '@/components/studio/PreviewPane';
 import { LeftRail } from '@/components/studio/LeftRail';
 import { Splitter } from '@/components/studio/Splitter';
-import { extractArtifact, extractQuestionForm, composeSystemPrompt, inferPhase } from '@/lib/prompt';
+import { extractArtifact, extractQuestionForm, composeSystemPrompt, inferPhase, usesDirectArtifactGeneration } from '@/lib/prompt';
 import { processArtifactImages } from '@/lib/image-pipeline';
 import {
   shouldAutoContinue,
@@ -44,6 +44,7 @@ export function Studio() {
   // Track the buffer snapshot before a continuation so we can detect overlap
   const bufferBeforeContinueRef = useRef<string>('');
   const autoContinueKickRef = useRef(false);
+  const questionFormKickRef = useRef(false);
   const streamStartedAtRef = useRef(Date.now());
   // Image generation progress state
   const [imageGenProgress, setImageGenProgress] = useState<{ done: number; total: number } | null>(null);
@@ -179,10 +180,15 @@ export function Studio() {
       streamStartedAtRef.current = Date.now();
     }
 
+    const designTokens = selectedDesignSystemId
+      ? (await window.renoir.getDesignSystem(selectedDesignSystemId))?.tokens
+      : undefined;
+
     const composed = composeSystemPrompt({
       skill,
       primer: skill ? (await window.renoir.getSkillPrimer(skill.id)) ?? undefined : undefined,
       designSystem,
+      designTokens,
       direction,
       answers,
     });
@@ -258,6 +264,10 @@ export function Studio() {
 
   // Only render *complete* artifacts in the preview — partial HTML flashes
   // white/black and shows raw markup while the model is still streaming.
+  const lastUserIdx = project?.conversation.findLastIndex((m) => m.role === 'user') ?? -1;
+  const lastAssistantIdx = project?.conversation.findLastIndex((m) => m.role === 'assistant') ?? -1;
+  const awaitingNewArtifact = Boolean(project && lastUserIdx > lastAssistantIdx);
+
   const completeArtifactHtml = useMemo(() => {
     if (activeVersion?.html) return activeVersion.html;
     if (liveExtracted?.complete) return liveExtracted.html;
@@ -268,13 +278,42 @@ export function Studio() {
     return null;
   }, [activeVersion, liveExtracted, isStreaming, lastAssistant]);
 
+  const previewArtifact = awaitingNewArtifact && !liveExtracted?.complete ? null : completeArtifactHtml;
+
   const fallbackExtracted = activeVersion
     ? { html: activeVersion.html, complete: true }
     : (lastAssistant ? extractArtifact(lastAssistant.content) : null);
   const liveText = isStreaming ? pendingAssistant : (lastAssistant?.content || '');
-  const questionForm = !liveExtracted && !fallbackExtracted?.complete ? extractQuestionForm(liveText) : null;
+  const directGenerate = usesDirectArtifactGeneration(skill);
+  const questionForm = directGenerate || liveExtracted || fallbackExtracted?.complete
+    ? null
+    : extractQuestionForm(liveText);
+  const stalledOnQuestionForm = Boolean(
+    directGenerate && !isStreaming && lastAssistant && !fallbackExtracted?.complete && extractQuestionForm(lastAssistant.content),
+  );
 
   const truncated = Boolean(!isStreaming && lastAssistant && fallbackExtracted && !fallbackExtracted.complete);
+
+  // If the model emitted a question form on a direct-generate skill, nudge it to render.
+  useEffect(() => {
+    if (!project || isStreaming || autoContinueRef.current.isAutoContinuing) return;
+    if (!stalledOnQuestionForm) { questionFormKickRef.current = false; return; }
+    if (questionFormKickRef.current) return;
+    questionFormKickRef.current = true;
+    const nextState: AutoContinueState = {
+      ...autoContinueRef.current,
+      attempts: autoContinueRef.current.attempts + 1,
+      isAutoContinuing: true,
+    };
+    syncAutoContinue(nextState);
+    bufferBeforeContinueRef.current = lastAssistant?.content || '';
+    void sendUserMessage(
+      skill?.id === 'pricing-page'
+        ? 'Skip the question form. Generate the full pricing page artifact now. Use Free / Standard / Premium defaults with domain-appropriate copy for anything missing.'
+        : 'Skip the question form. Generate the full artifact now using sensible defaults for anything missing in the brief.',
+      { silentContinue: true },
+    );
+  }, [stalledOnQuestionForm, isStreaming, project, lastAssistant?.content]);
 
   // Safety net: if a turn ended with an open artifact, resume automatically.
   useEffect(() => {
@@ -302,7 +341,7 @@ export function Studio() {
     Date.now() - streamStartedAtRef.current,
   );
   const isGenerating = isStreaming || autoContinue.isAutoContinuing || (truncated && !autoContinueExhausted);
-  const showPreviewLoading = Boolean(isGenerating && !completeArtifactHtml);
+  const showPreviewLoading = Boolean(isGenerating && !previewArtifact);
 
   const continueLast = async () => {
     if (!project) return;
@@ -315,7 +354,16 @@ export function Studio() {
     await cancel();
   };
 
-  if (!project) return <EmptyState />;
+  if (!project) {
+    return (
+      <div className="flex h-full flex-col">
+        <StudioLayout
+          chat={<ChatPane onSend={(content, attachments) => sendUserMessage(content, { attachments })} onCancel={cancel} onRegenerate={regenerateFrom} questionForm={null} directGenerate={false} autoContinue={autoContinue} onCancelAutoContinue={cancelAutoContinue} />}
+          preview={<PreviewPane artifact={null} />}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -329,8 +377,8 @@ export function Studio() {
         </div>
       )}
       <StudioLayout
-        chat={<ChatPane onSend={(content, attachments) => sendUserMessage(content, { attachments })} onCancel={cancel} onRegenerate={regenerateFrom} questionForm={questionForm} autoContinue={autoContinue} onCancelAutoContinue={cancelAutoContinue} />}
-        preview={<PreviewPane artifact={completeArtifactHtml} loading={showPreviewLoading} loadingPhase={generationPhase} imageGenProgress={imageGenProgress} />}
+        chat={<ChatPane onSend={(content, attachments) => sendUserMessage(content, { attachments })} onCancel={cancel} onRegenerate={regenerateFrom} questionForm={questionForm} directGenerate={directGenerate} autoContinue={autoContinue} onCancelAutoContinue={cancelAutoContinue} />}
+        preview={<PreviewPane artifact={previewArtifact} loading={showPreviewLoading} loadingPhase={generationPhase} imageGenProgress={imageGenProgress} />}
       />
     </div>
   );

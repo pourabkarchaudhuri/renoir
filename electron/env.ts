@@ -35,9 +35,17 @@ export function loadEnv(): { source: string | null } {
 }
 
 export function azureConfig() {
+  const endpoint = (process.env.AZURE_FOUNDRY_ENDPOINT || '').replace(/\/+$/, '');
+  const imageEndpoint = (process.env.AZURE_IMAGE_ENDPOINT || endpoint).replace(/\/+$/, '');
+  const apiKey = process.env.AZURE_FOUNDRY_API_KEY || '';
+  const imageApiKey = process.env.AZURE_IMAGE_API_KEY || apiKey;
   return {
-    endpoint:    (process.env.AZURE_FOUNDRY_ENDPOINT || '').replace(/\/+$/, ''),
-    apiKey:       process.env.AZURE_FOUNDRY_API_KEY || '',
+    endpoint,
+    /** Resource for images/edits — may differ from text (Foundry project vs resource-level). */
+    imageEndpoint,
+    apiKey,
+    /** Key for image resource — defaults to AZURE_FOUNDRY_API_KEY when unset. */
+    imageApiKey,
     apiVersion:   process.env.AZURE_FOUNDRY_API_VERSION || '2025-04-01-preview',
     imageModel:   process.env.AZURE_IMAGE_DEPLOYMENT || 'gpt-image-2',
     textModel:    process.env.AZURE_TEXT_DEPLOYMENT || 'gpt-5.4',
@@ -47,4 +55,9 @@ export function azureConfig() {
 export function azureConfigured(): boolean {
   const c = azureConfig();
   return Boolean(c.endpoint && c.apiKey);
+}
+
+export function azureImageConfigured(): boolean {
+  const c = azureConfig();
+  return Boolean(c.imageEndpoint && c.imageApiKey);
 }

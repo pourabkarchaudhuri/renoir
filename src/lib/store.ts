@@ -3,6 +3,7 @@ import type {
   ProjectRecord, SkillSummary, DesignSystemSummary, ByokConfig, AzureStatus, ProjectMessage,
   PromptTemplate, VisualDirection, AgentRecord, TemplateRecord,
 } from '@/types/global';
+import { loadSession, syncActiveSession, projectHasSkillWork, clearInheritedStudyTitle } from '@/lib/skill-sessions';
 
 export type Route = 'home' | 'studio' | 'gallery' | 'settings' | 'media';
 
@@ -216,6 +217,7 @@ interface StudioState {
   setProject: (rec: ProjectRecord | null) => void;
   setDraft: (s: string) => void;
   setSkill: (id?: string) => void;
+  switchSkill: (id: string) => Promise<void>;
   setSystem: (id?: string) => void;
   setDirection: (id?: string) => void;
   setAgent: (id?: string) => void;
@@ -243,17 +245,87 @@ export const useStudio = create<StudioState>((set, get) => ({
   selectedAgentId: 'byok',
   questionAnswers: {},
 
-  setProject: (rec) => set({
-    projectId: rec?.id ?? null,
-    project: rec,
-    selectedSkillId: rec?.skillId,
-    selectedDesignSystemId: rec?.designSystemId,
-    selectedDirectionId: rec?.visualDirectionId,
-    selectedAgentId: rec?.agentId || 'byok',
-    questionAnswers: {},
-  }),
+  setProject: (rec) => {
+    if (!rec) {
+      set({
+        projectId: null,
+        project: null,
+        selectedSkillId: undefined,
+        selectedDesignSystemId: undefined,
+        selectedDirectionId: undefined,
+        selectedAgentId: 'byok',
+        questionAnswers: {},
+      });
+      return;
+    }
+    const st = get();
+    const skillId = st.selectedSkillId ?? rec.skillId ?? 'web-prototype';
+    const loaded = loadSession(rec, skillId);
+    set({
+      projectId: loaded.id,
+      project: loaded,
+      selectedSkillId: skillId,
+      selectedDesignSystemId: rec.designSystemId,
+      selectedDirectionId: rec.visualDirectionId,
+      selectedAgentId: rec.agentId || 'byok',
+      questionAnswers: {},
+    });
+  },
   setDraft: (s) => set({ draft: s }),
   setSkill: (id) => set({ selectedSkillId: id, questionAnswers: {} }),
+  switchSkill: async (newSkillId) => {
+    const st = get();
+    if (!newSkillId || newSkillId === st.selectedSkillId) return;
+
+    const pickProjectForSkill = async (saved?: ProjectRecord) => {
+      const all = await window.renoir.listProjects();
+      return all.find((p) => p.id !== saved?.id && projectHasSkillWork(p, newSkillId));
+    };
+
+    if (st.project) {
+      const oldSkillId = st.selectedSkillId || st.project.skillId || 'web-prototype';
+      let saved = syncActiveSession(st.project, oldSkillId);
+      saved = { ...saved, updatedAt: new Date().toISOString() };
+      await window.renoir.saveProject(saved);
+
+      let loaded = clearInheritedStudyTitle(loadSession(saved, newSkillId), newSkillId);
+      if (projectHasSkillWork(loaded, newSkillId)) {
+        set({ selectedSkillId: newSkillId, projectId: loaded.id, project: loaded, questionAnswers: {}, draft: '' });
+        return;
+      }
+
+      const other = await pickProjectForSkill(saved);
+      if (other) {
+        const opened = clearInheritedStudyTitle(loadSession(other, newSkillId), newSkillId);
+        set({
+          selectedSkillId: newSkillId,
+          projectId: opened.id,
+          project: opened,
+          questionAnswers: {},
+          draft: '',
+        });
+        return;
+      }
+
+      // Keep the study open with an empty skill session — avoids a null-project crash path.
+      set({ selectedSkillId: newSkillId, projectId: loaded.id, project: loaded, questionAnswers: {}, draft: '' });
+      return;
+    }
+
+    const match = await pickProjectForSkill();
+    if (match) {
+      const opened = clearInheritedStudyTitle(loadSession(match, newSkillId), newSkillId);
+      set({
+        selectedSkillId: newSkillId,
+        projectId: opened.id,
+        project: opened,
+        questionAnswers: {},
+        draft: '',
+      });
+    } else {
+      set({ selectedSkillId: newSkillId, project: null, projectId: null, questionAnswers: {}, draft: '' });
+    }
+  },
   setSystem: (id) => set({ selectedDesignSystemId: id }),
   setDirection: (id) => set({ selectedDirectionId: id }),
   setAgent: (id) => {
@@ -308,7 +380,7 @@ export const useStudio = create<StudioState>((set, get) => ({
     };
     if (tail && (tail as any).inProgress) conv[conv.length - 1] = finalMsg;
     else conv.push(finalMsg);
-    let next: ProjectRecord = { ...st.project, conversation: conv };
+    let next: ProjectRecord = syncActiveSession({ ...st.project, conversation: conv }, st.selectedSkillId ?? st.project.skillId ?? 'web-prototype');
 
     // Snapshot artifact if the assistant emitted one (only the closed form
     // is committed as a version — partials become versions on next assistant
@@ -332,13 +404,14 @@ export const useStudio = create<StudioState>((set, get) => ({
       ts: new Date().toISOString(),
       ...(attachments?.length ? { attachments } : {}),
     };
-    const next: ProjectRecord = {
+    const skillId = st.selectedSkillId ?? st.project.skillId ?? 'web-prototype';
+    const next: ProjectRecord = syncActiveSession({
       ...st.project,
-      skillId: st.selectedSkillId ?? st.project.skillId,
+      skillId,
       designSystemId: st.selectedDesignSystemId ?? st.project.designSystemId,
       agentId: st.selectedAgentId ?? st.project.agentId,
       conversation: [...st.project.conversation, msg],
-    };
+    }, skillId);
     await window.renoir.saveProject(next);
     set({ project: next, draft: '' });
   },

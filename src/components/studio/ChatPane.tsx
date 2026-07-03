@@ -16,11 +16,12 @@ interface Props {
   onCancel: () => void;
   onRegenerate: (fromIndex: number) => void;
   questionForm: { id: string; label: string; type: string; options?: string[] }[] | null;
+  directGenerate?: boolean;
   autoContinue?: AutoContinueState;
   onCancelAutoContinue?: () => void;
 }
 
-export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, autoContinue, onCancelAutoContinue }: Props) {
+export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, directGenerate, autoContinue, onCancelAutoContinue }: Props) {
   const project = useStudio((s) => s.project);
   const draft = useStudio((s) => s.draft);
   const setDraft = useStudio((s) => s.setDraft);
@@ -36,7 +37,7 @@ export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, autoCon
     <section className="flex-1 flex flex-col min-w-0">
       <div ref={scroll} className="flex-1 overflow-y-auto scroll-thin px-8 py-6 space-y-6">
         {(!project?.conversation || project.conversation.length === 0) && (
-          <Greeting />
+          <Greeting directGenerate={directGenerate} />
         )}
 
         {project?.conversation
@@ -83,7 +84,7 @@ export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, autoCon
   );
 }
 
-function Greeting() {
+function Greeting({ directGenerate }: { directGenerate?: boolean }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -100,8 +101,9 @@ function Greeting() {
           <div className="text-[10px] uppercase tracking-[0.32em] text-primary/80">Renoir</div>
           <h3 className="font-display italic text-2xl mt-0.5">Tell me what to render.</h3>
           <p className="text-sm text-muted-foreground mt-2 max-w-prose leading-relaxed">
-            Drop a brief and I will return a runnable artifact. If the brief is thin, expect a short
-            question form first — locking the scope keeps the output sharp.
+            {directGenerate
+              ? 'Send a prompt and I will return a runnable artifact. Thin briefs are fine — I will fill gaps with sensible defaults.'
+              : 'Drop a brief and I will return a runnable artifact. If the brief is thin, expect a short question form first — locking the scope keeps the output sharp.'}
           </p>
         </div>
       </div>
@@ -357,7 +359,7 @@ function Composer({
   const agents = useCatalog((s) => s.agents);
   const byok = useCatalog((s) => s.byok);
   const selectedAgentId = useStudio((s) => s.selectedAgentId);
-  const setSkill = useStudio((s) => s.setSkill);
+  const switchSkill = useStudio((s) => s.switchSkill);
   const setSystem = useStudio((s) => s.setSystem);
   const setDirection = useStudio((s) => s.setDirection);
   const setAgent = useStudio((s) => s.setAgent);
@@ -444,7 +446,7 @@ function Composer({
 
   const applySlash = (item: { id: string; label: string }) => {
     const cmd = hint?.cmd || '';
-    if (cmd.startsWith('skill'))     { setSkill(item.id);     toast(`Skill → ${item.label}`, 'ok'); }
+    if (cmd.startsWith('skill'))     { void switchSkill(item.id); toast(`Skill → ${item.label}`, 'ok'); }
     else if (cmd.startsWith('system'))    { setSystem(item.id);    toast(`System → ${item.label}`, 'ok'); }
     else if (cmd.startsWith('direction')) { setDirection(item.id); toast(`Direction → ${item.label}`, 'ok'); }
     else if (cmd.startsWith('agent'))     { setAgent(item.id);     toast(`Agent → ${item.label}`, 'ok'); }

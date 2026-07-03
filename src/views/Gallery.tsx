@@ -6,6 +6,7 @@ import { Trash2, ArrowRight, FolderOpen, Upload, LibraryBig, LayoutGrid, Search,
 import { RemixDialog } from '@/components/gallery/RemixDialog';
 import { ConfirmDialog } from '@/components/chrome/ConfirmDialog';
 import { extractArtifact } from '@/lib/prompt';
+import { loadSession } from '@/lib/skill-sessions';
 import { cn } from '@/lib/cn';
 
 export function Gallery() {
@@ -73,7 +74,9 @@ export function Gallery() {
   };
 
   const open = (p: ProjectRecord) => {
-    setProject(p);
+    const skill = p.skillId || 'web-prototype';
+    setProject(loadSession(p, skill));
+    useStudio.getState().setSkill(skill);
     setRoute('studio');
   };
 

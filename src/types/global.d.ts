@@ -147,6 +147,12 @@ export interface ProjectAssets {
   hyperframes: ProjectAssetHyperframe[];
 }
 
+export interface SkillSession {
+  conversation: ProjectMessage[];
+  versions?: ArtifactVersion[];
+  activeVersionId?: string;
+}
+
 export interface ProjectRecord {
   id: string;
   name: string;
@@ -161,6 +167,7 @@ export interface ProjectRecord {
   artifacts: ProjectArtifact[];
   versions?: ArtifactVersion[];
   activeVersionId?: string;
+  skillSessions?: Record<string, SkillSession>;
 }
 
 export type ChatStreamEvent =
@@ -180,6 +187,7 @@ export interface RenoirAPI {
   listSkills:           () => Promise<SkillSummary[]>;
   getSkillPrimer:       (id: string) => Promise<string | null>;
   listDesignSystems:    () => Promise<DesignSystemSummary[]>;
+  getDesignSystem:      (id: string) => Promise<{ id: string; name: string; tokens: { name: string; value: string }[] } | null>;
   listPromptTemplates:  () => Promise<PromptTemplate[]>;
   listVisualDirections: () => Promise<VisualDirection[]>;
 

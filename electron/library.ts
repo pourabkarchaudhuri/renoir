@@ -50,8 +50,8 @@ const Q_BASE = [
 const skills: SkillRecord[] = [
   {
     id: 'web-prototype', name: 'Web Prototype', category: 'web', emoji: '🌐',
-    blurb: 'Single-page HTML+Tailwind prototype.',
-    primer: 'Output one self-contained HTML doc using the Tailwind CDN. Semantic sections, keyboard-accessible nav, modern responsive layout. Use split-hero or centered-hero pattern for the opening section. Apply elevation-1 shadows on cards, entrance animations on scroll, and dark/light theme tokens throughout. Add gradient orbs behind the hero for depth.',
+    blurb: 'Client-ready single-page website — token-driven CSS, full sections, no filler.',
+    primer: 'Build a complete client-ready single-page site in one self-contained HTML file. Use a single <style> block with :root CSS tokens from the active design system — not Tailwind CDN. Minimum: sticky nav, hero, services/features grid, gallery or showcase, CTA band, footer. Header must use flex-wrap so logo, links, and CTA never overflow (min-width:0 on children). Serif display headlines, inline SVG icons (no emoji), .ph-img for photos. Copy must be specific to the user brief — no lorem, no invented metrics, no generic AI-startup gradients.',
     questions: Q_BASE,
   },
   {
@@ -89,10 +89,11 @@ const skills: SkillRecord[] = [
   },
   {
     id: 'pricing-page', name: 'Pricing Page', category: 'web', emoji: '💵',
-    blurb: 'Plans table + comparison + monthly/annual toggle.',
-    primer: 'Three-tier plan cards (center highlighted at scale 1.05 with accent border-top and "Popular" badge), feature comparison matrix, monthly/annual toggle with animated price change, FAQ section, enterprise callout CTA. Use elevation-1 at rest, elevation-2 on hover. Dark/light theme tokens. Realistic pricing: "$19/mo", "$49/mo", "$99/mo".',
+    blurb: 'Three-tier pricing — Free / Standard / Premium cards, comparison, FAQ.',
+    primer: 'Build a focused pricing page (not a full marketing site). Never ask clarifying questions — infer product name, tone, and tier copy from the brief. Claude-style three-column plan cards on a dark token-driven canvas. Default tier names: Free, Standard, Premium — unless the brief specifies different names/prices. One self-contained HTML file, inline CSS only, design-system tokens. Min: compact header, hero title, optional monthly/annual toggle, 3 plan cards, feature comparison table, FAQ, slim footer.',
     questions: [
-      { id: 'tiers', label: 'Plan tiers + price', type: 'textarea' },
+      { id: 'product', label: 'Product name', type: 'text' },
+      { id: 'tiers', label: 'Custom tiers (optional)', type: 'textarea', placeholder: 'Leave blank for Free / Standard / Premium defaults' },
       { id: 'tone',  label: 'Tone', type: 'select', options: ['confident', 'friendly', 'editorial'] },
     ],
   },
