@@ -63,6 +63,10 @@ export interface LintFinding {
   level: 'error' | 'warn' | 'info';
   rule: string;
   message: string;
+  category?: 'structure' | 'forms' | 'images' | 'contrast' | 'keyboard' | 'dashboard';
+  selector?: string;
+  fixable?: boolean;
+  source?: 'static' | 'probe';
 }
 
 export interface LintReport {
@@ -178,6 +182,14 @@ export interface ProjectRecord {
   activeVersionId?: string;
   /** Per-skill chat + preview state; top-level conversation/versions mirror the active skill. */
   skillSessions?: Record<string, SkillSession>;
+  /** User-defined labels for organizing studies on Home. */
+  tags?: string[];
+  /** Pin to top of project lists. */
+  pinned?: boolean;
+  /** Last active skill (denormalized for filter chips). */
+  lastSkillId?: string;
+  /** Cached brand extraction from conversation brief. */
+  brandSpec?: BrandSpec;
 }
 
 export type ChatStreamEvent =
@@ -208,8 +220,11 @@ export interface RenoirAPI {
       attachments?: MessageAttachment[];
     }[];
     temperature?: number;
+    maxTokens?: number;
   }) => Promise<{ ok: boolean; error?: string }>;
   chatCancel: (id: string) => Promise<boolean>;
+  buildMarketingSite: (brief: { productName?: string; tagline?: string }) => Promise<{ ok: boolean; html?: string; error?: string }>;
+  buildBlogPost: (brief: { companyName?: string; headline?: string }) => Promise<{ ok: boolean; html?: string; error?: string }>;
   onChatEvent: (cb: (e: ChatStreamEvent) => void) => () => void;
   chatRoute: () => Promise<{ ready: boolean; source: string; kind: 'anthropic' | 'azure' | 'azure-responses' | 'openai' | 'none' }>;
   themeSet: (t: 'dark' | 'light') => Promise<{ ok: boolean }>;
@@ -245,6 +260,23 @@ export interface RenoirAPI {
   hyperframesRender: (req: {
     projectId: string; html: string; durationSec: number; fps?: number; width?: number; height?: number;
   }) => Promise<{ ok: boolean; framesDir?: string; videoPath?: string; encoder?: 'ffmpeg' | 'none'; error?: string }>;
+
+  previewRecord: (req: {
+    projectId: string;
+    html: string;
+    mode: 'static' | 'scroll' | 'present';
+    surface?: 'phone' | 'tablet' | 'desktop' | 'ultrawide';
+    durationSec?: number;
+    fps?: number;
+    slideCount?: number;
+  }) => Promise<{
+    ok: boolean;
+    framesDir?: string;
+    videoPath?: string;
+    pngPath?: string;
+    encoder?: 'ffmpeg' | 'none';
+    error?: string;
+  }>;
 
   lintArtifact: (html: string) => Promise<LintReport>;
   brandExtract: (text: string) => Promise<BrandSpec>;

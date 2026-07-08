@@ -18,6 +18,8 @@ const C = {
   chatCancel: 'renoir:chat:cancel',
   chatEvent:  'renoir:chat:event',
   chatRoute:  'renoir:chat:route',
+  marketingInstant: 'renoir:marketing:instant',
+  blogPostInstant: 'renoir:blog-post:instant',
   themeSet:   'renoir:theme:set',
 
   agentsList:   'renoir:agents:list',
@@ -67,6 +69,7 @@ const C = {
   previewOpen: 'renoir:preview:open',
   previewPush: 'renoir:preview:push',
   previewIsOpen: 'renoir:preview:isOpen',
+  previewRecord: 'renoir:preview:record',
   customListDirections:   'renoir:custom:listDirections',
   customSaveDirection:    'renoir:custom:saveDirection',
   customDeleteDirection:  'renoir:custom:deleteDirection',
@@ -95,6 +98,8 @@ contextBridge.exposeInMainWorld('renoir', {
   chatStart:  (req) => ipcRenderer.invoke(C.chatStart, req),
   chatCancel: (id)  => ipcRenderer.invoke(C.chatCancel, id),
   chatRoute:  () => ipcRenderer.invoke(C.chatRoute),
+  buildMarketingSite: (brief) => ipcRenderer.invoke(C.marketingInstant, brief),
+  buildBlogPost: (brief) => ipcRenderer.invoke(C.blogPostInstant, brief),
   themeSet:   (t) => ipcRenderer.invoke(C.themeSet, t),
   onChatEvent: (cb) => {
     const handler = (_e, payload) => cb(payload);
@@ -153,6 +158,7 @@ contextBridge.exposeInMainWorld('renoir', {
   openPreview:     (html) => ipcRenderer.invoke(C.previewOpen, html),
   pushPreview:     (html) => ipcRenderer.invoke(C.previewPush, html),
   previewIsOpen:   () => ipcRenderer.invoke(C.previewIsOpen),
+  previewRecord:   (req) => ipcRenderer.invoke(C.previewRecord, req),
   listCustomDirections:   () => ipcRenderer.invoke(C.customListDirections),
   saveCustomDirection:    (rec) => ipcRenderer.invoke(C.customSaveDirection, rec),
   deleteCustomDirection:  (id) => ipcRenderer.invoke(C.customDeleteDirection, id),

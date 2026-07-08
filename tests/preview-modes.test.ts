@@ -213,6 +213,11 @@ describe('NAV_BRIDGE present mode CSS', () => {
     expect(NAV_BRIDGE).toContain('bootPresentIfDeck');
   });
 
+  it('prefers data-screen-id flow screens over nested sections', () => {
+    expect(NAV_BRIDGE).toContain("document.querySelectorAll('[data-screen-id]')");
+    expect(NAV_BRIDGE).toContain("document.querySelectorAll('[data-screen-id]').length >= 2");
+  });
+
   it('applies deck contrast helpers', () => {
     expect(NAV_BRIDGE).toContain('applySlideContrast');
     expect(NAV_BRIDGE).toContain('revealSlideAnimations');
@@ -221,6 +226,27 @@ describe('NAV_BRIDGE present mode CSS', () => {
 
   it('handles explicit preview reload messages', () => {
     expect(NAV_BRIDGE).toContain("d.type === 'renoir:reload'");
+  });
+
+  it('supports point-and-edit pick messages', () => {
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:pick-enable'");
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:pick-disable'");
+    expect(NAV_BRIDGE).toContain("type: 'renoir:picked'");
+    expect(NAV_BRIDGE).toContain('data-od-id');
+  });
+
+  it('supports scroll-sync and flow walk messages', () => {
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:scroll-sync'");
+    expect(NAV_BRIDGE).toContain("type: 'renoir:scroll'");
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:flow-enable'");
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:flow-nav'");
+    expect(NAV_BRIDGE).toContain("type: 'renoir:flow-screen'");
+  });
+
+  it('supports live a11y probe messages', () => {
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:a11y-probe'");
+    expect(NAV_BRIDGE).toContain("type: 'renoir:a11y-report'");
+    expect(NAV_BRIDGE).toContain('runA11yProbe');
   });
 
   it('does not force a white background in present mode', () => {

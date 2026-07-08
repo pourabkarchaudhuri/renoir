@@ -3,7 +3,7 @@ import {
   Download, Smartphone, Tablet, Monitor, Maximize2, Loader2, Code, RotateCcw,
   BookmarkPlus, ScanSearch, FileText, GitFork, ExternalLink, MoreHorizontal,
   Minimize2, ChevronLeft, ChevronRight, Presentation, ScrollText, Presentation as PresentIcon,
-  Upload, FileDown, Save as SaveIcon,
+  Upload, FileDown, Save as SaveIcon, Crosshair, Video, Footprints, GitCompare,
 } from 'lucide-react';
 import { useStudio, useUI, useCatalog } from '@/lib/store';
 import { VersionStrip } from './VersionStrip';
@@ -26,16 +26,28 @@ import { normalizeArtifactDocument } from '@/lib/artifact-html';
 import { repairArtifactIfNeeded } from '@/lib/artifact-repair';
 import { applySession, getSkillSession, patchSkillSession } from '@/lib/skill-sessions';
 import { DevicePreviewFrame } from './DevicePreviewFrame';
+import { PreviewLoading } from './PreviewLoading';
+import { RecordPreviewDialog } from './RecordPreviewDialog';
+import { VariantCompareDialog } from './VariantCompareDialog';
+import { isFeatureEnabled } from '@/lib/features';
+import { artifactHasFlowLinks } from '@/lib/flow-screens';
+import type { PreviewGenerationProgress } from '@/lib/preview-generation-progress';
 
 type Surface = PreviewSurface;
 
 export function PreviewPane({
   artifact,
+  loading = false,
+  loadingPhase = 'Composing your artifact…',
+  loadingProgress = null,
   streaming = false,
   imageGenProgress = null,
   artifactResetKey,
 }: {
   artifact: string | null;
+  loading?: boolean;
+  loadingPhase?: string;
+  loadingProgress?: PreviewGenerationProgress | null;
   streaming?: boolean;
   imageGenProgress?: { done: number; total: number } | null;
   /** Changes when a new generation or version is selected — resets slide index for deck skills. */
@@ -71,6 +83,11 @@ export function PreviewPane({
       : modeOverride;
   const [navState, setNavState] = useState<{ idx: number; total: number }>({ idx: 0, total: 1 });
   const [reloadGen, setReloadGen] = useState(0);
+  const [pickMode, setPickMode] = useState(false);
+  const [walkMode, setWalkMode] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+  const setActiveFlowScreenId = useUI((s) => s.setActiveFlowScreenId);
 
   useEffect(() => {
     if (desktopOnly && surface !== 'desktop') setPreviewSurface('desktop');
@@ -78,8 +95,7 @@ export function PreviewPane({
 
   const docTitle = project?.name?.trim() || 'Artifact';
 
-  const dashboardTheme = useMemo(() => {
-    if (skillId !== 'dashboard') return undefined;
+  const artifactTheme = useMemo(() => {
     const ds = designSystems.find((d) => d.id === selectedDesignSystemId);
     if (!ds?.tokens?.length) return undefined;
     const dir = directions.find((d) => d.id === selectedDirectionId);
@@ -88,13 +104,13 @@ export function PreviewPane({
       font: ds.font,
       directionSwatches: dir?.swatches,
     };
-  }, [skillId, designSystems, directions, selectedDesignSystemId, selectedDirectionId]);
+  }, [designSystems, directions, selectedDesignSystemId, selectedDirectionId]);
 
   const srcDocsBySurface = useMemo(() => {
     if (!artifact) return null;
     const normalized = normalizeArtifactDocument(artifact, {
       title: docTitle,
-      theme: dashboardTheme,
+      theme: artifactTheme,
       dashboard: skillId === 'dashboard',
       productDeck: skillId === 'product-deck',
       productName: docTitle,
@@ -107,7 +123,7 @@ export function PreviewPane({
       out[id] = wrapWithBridge(html);
     }
     return out;
-  }, [artifact, docTitle, dashboardTheme, skillId, activeSurfaces, streaming]);
+  }, [artifact, docTitle, artifactTheme, skillId, activeSurfaces, streaming]);
 
   useEffect(() => {
     if (!artifact || !desktopOnly) return;
@@ -127,13 +143,13 @@ export function PreviewPane({
     return normalizeArtifactDocument(artifact, {
       title: docTitle,
       viewportWidth: PREVIEW_SURFACES[surface].w,
-      theme: dashboardTheme,
+      theme: artifactTheme,
       dashboard: skillId === 'dashboard',
       productDeck: skillId === 'product-deck',
       productName: docTitle,
       productDeckFinalize: !streaming,
     });
-  }, [artifact, surface, docTitle, dashboardTheme, skillId, streaming]);
+  }, [artifact, surface, docTitle, artifactTheme, skillId, streaming]);
 
   // Listen for nav-state messages from the iframe bridge.
   useEffect(() => {
@@ -145,14 +161,89 @@ export function PreviewPane({
         if (win && e.source !== win) return;
       }
       setNavState({ idx: d.idx ?? 0, total: d.total ?? 1 });
+      setActiveFlowScreenId(`slide-${d.idx ?? 0}`);
     };
     window.addEventListener('message', onMsg);
     return () => window.removeEventListener('message', onMsg);
-  }, [desktopOnly]);
+  }, [desktopOnly, setActiveFlowScreenId]);
 
   const postToSurface = useCallback((surf: PreviewSurface, msg: unknown) => {
     iframeRefs.current[surf]?.contentWindow?.postMessage(msg, '*');
   }, []);
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data;
+      if (d?.type === 'renoir:picked') {
+        const odId = d.odId as string | undefined;
+        if (!odId) {
+          toast('No tagged region — artifacts need data-od-id sections', 'warn');
+          return;
+        }
+        window.dispatchEvent(new CustomEvent('renoir:pick-target', {
+          detail: {
+            odId,
+            tag: d.tag,
+            textPreview: d.textPreview,
+            artifactHtml: artifact,
+          },
+        }));
+        setPickMode(false);
+        return;
+      }
+      if (d?.type === 'renoir:a11y-report') {
+        window.dispatchEvent(new CustomEvent('renoir:a11y-probe-result', { detail: d }));
+        return;
+      }
+      if (d?.type === 'renoir:flow-screen') {
+        const screenId = d.screenId as string | undefined;
+        if (screenId) setActiveFlowScreenId(screenId);
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, [artifact, toast, setActiveFlowScreenId]);
+
+  useEffect(() => {
+    const msg = pickMode ? { type: 'renoir:pick-enable' } : { type: 'renoir:pick-disable' };
+    for (const id of activeSurfaces) postToSurface(id, msg);
+    if (!pickMode) return;
+    if (effectiveMode === 'present') {
+      setPickMode(false);
+      toast('Pick mode works in scroll view only', 'info');
+    }
+  }, [pickMode, effectiveMode, activeSurfaces, postToSurface, toast]);
+
+  useEffect(() => {
+    if (!isFeatureEnabled('clickThrough')) return;
+    const msg = walkMode ? { type: 'renoir:flow-enable' } : { type: 'renoir:flow-disable' };
+    for (const id of activeSurfaces) postToSurface(id, msg);
+    if (!walkMode) return;
+    if (effectiveMode === 'present') {
+      setWalkMode(false);
+      toast('Walk mode works in scroll view only', 'info');
+    }
+  }, [walkMode, effectiveMode, activeSurfaces, postToSurface, toast]);
+
+  useEffect(() => {
+    const onProbe = () => {
+      for (const id of activeSurfaces) postToSurface(id, { type: 'renoir:a11y-probe' });
+    };
+    const onFlowNav = (e: Event) => {
+      const screenId = (e as CustomEvent).detail?.screenId as string | undefined;
+      if (!screenId) return;
+      postToSurface(surface, { type: 'renoir:flow-nav', screenId });
+      window.requestAnimationFrame(() => {
+        if (window.scrollY !== 0) window.scrollTo(0, 0);
+      });
+    };
+    window.addEventListener('renoir:run-a11y-probe', onProbe);
+    window.addEventListener('renoir:flow-nav-request', onFlowNav);
+    return () => {
+      window.removeEventListener('renoir:run-a11y-probe', onProbe);
+      window.removeEventListener('renoir:flow-nav-request', onFlowNav);
+    };
+  }, [activeSurfaces, postToSurface, surface]);
 
   const postNavToDesktop = useCallback((idx: number) => {
     postToSurface('desktop', { type: 'renoir:set-mode', mode: 'present' });
@@ -284,25 +375,32 @@ export function PreviewPane({
     }
   };
 
-  const runCritique = async () => {
+  const runCritique = useCallback(async () => {
     if (!artifact || !project) return;
-    const id = `${project.id}-critique-${Date.now()}`;
+    const html = baseHtml ?? artifact;
+    const id = `${project.id}:critique:${Date.now()}`;
     const userMsg = '/critique — review the latest artifact across hierarchy, typography, contrast, spacing, affordance.';
-    await useStudio.getState().appendUser(userMsg);
+
+    useStudio.getState().bindConversation(id);
     useStudio.getState().startStreaming();
-    const lastUserBrief = project.conversation.find((m) => m.role === 'user')?.content || '';
-    const res = await window.renoir.critiqueStart({ conversationId: id, artifactHtml: activeSrcDoc!, brief: lastUserBrief });
+
+    const brief = project.conversation.find(
+      (m) => m.role === 'user' && !m.content.startsWith('/critique'),
+    )?.content || '';
+    const res = await window.renoir.critiqueStart({ conversationId: id, artifactHtml: html, brief });
+    void useStudio.getState().appendUser(userMsg);
+
     if (!res.ok) {
       toast(res.error || 'critique failed', 'err');
       void useStudio.getState().finishStreaming();
     }
-  };
+  }, [artifact, project, baseHtml, toast]);
 
   useEffect(() => {
     const h = () => { void runCritique(); };
     window.addEventListener('renoir:run-critique', h);
     return () => window.removeEventListener('renoir:run-critique', h);
-  });
+  }, [runCritique]);
 
   // Push to detached preview window whenever the artifact changes.
   useEffect(() => {
@@ -327,6 +425,32 @@ export function PreviewPane({
     if (!activeSrcDoc) return;
     await window.renoir.openPreview(activeSrcDoc);
     toast('Detached preview opened', 'ok');
+  };
+
+  const runPreviewRecord = async (opts: { mode: 'static' | 'scroll' | 'present'; durationSec: number; fps: number }) => {
+    if (!activeSrcDoc || !project) return;
+    const id = useUI.getState().pushExport({ kind: 'pdf', label: 'Recording preview' });
+    try {
+      useUI.getState().updateExport(id, { phase: 'capturing frames…' });
+      const res = await window.renoir.previewRecord({
+        projectId: project.id,
+        html: activeSrcDoc,
+        mode: opts.mode,
+        surface,
+        durationSec: opts.durationSec,
+        fps: opts.fps,
+        slideCount: navState.total,
+      });
+      if (res.ok) {
+        const path = res.videoPath ?? res.pngPath ?? res.framesDir;
+        useUI.getState().completeExport(id, { ok: true, savedPath: path });
+        toast(res.error ? `Saved frames (${res.error})` : 'Recording saved', res.error ? 'warn' : 'ok');
+      } else {
+        useUI.getState().completeExport(id, { ok: false, error: res.error });
+      }
+    } catch (err: unknown) {
+      useUI.getState().completeExport(id, { ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
   };
 
   const saveAsTemplate = async () => {
@@ -373,7 +497,7 @@ export function PreviewPane({
     const normalizeOpts = {
       title: docTitle,
       viewportWidth: PREVIEW_SURFACES[surface].w,
-      theme: dashboardTheme,
+      theme: artifactTheme,
       dashboard: skillId === 'dashboard',
       productDeck: skillId === 'product-deck',
       productName: docTitle,
@@ -427,7 +551,7 @@ export function PreviewPane({
     baseHtml,
     docTitle,
     surface,
-    dashboardTheme,
+    artifactTheme,
     skillId,
     streaming,
     project,
@@ -455,6 +579,22 @@ export function PreviewPane({
             live
           </span>
         )}
+        {loadingProgress && !loading && (
+          <span
+            className="flex items-center gap-2 px-2 h-6 rounded text-[10px] uppercase tracking-[0.14em] text-muted-foreground bg-secondary/80 ring-1 ring-border"
+            title={loadingProgress.phase}
+          >
+            <span className="font-mono tracking-normal normal-case">
+              {loadingProgress.completedCount}/{loadingProgress.totalCount}
+            </span>
+            <span className="w-16 h-1 rounded-full bg-background/80 overflow-hidden">
+              <span
+                className="block h-full bg-gradient-to-r from-ember-400 to-ember-600 transition-[width] duration-300"
+                style={{ width: `${Math.max(8, Math.round(loadingProgress.fraction * 100))}%` }}
+              />
+            </span>
+          </span>
+        )}
         {imageGenProgress && (
           <span className="flex items-center gap-1.5 px-1.5 h-6 rounded text-[10px] uppercase tracking-[0.18em] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 ring-1 ring-emerald-500/30">
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -475,6 +615,47 @@ export function PreviewPane({
         </span>
         {effectiveMode === 'present' && !desktopOnly && (
           <SlideNav nav={navState} onPrev={() => navigateSlide({ dir: 'prev' })} onNext={() => navigateSlide({ dir: 'next' })} />
+        )}
+        {artifact && effectiveMode !== 'present' && (
+          <button
+            type="button"
+            onClick={() => {
+              setPickMode((v) => {
+                const next = !v;
+                if (next) setWalkMode(false);
+                return next;
+              });
+            }}
+            className={cn(
+              'h-7 w-7 grid place-items-center rounded-md transition-colors',
+              pickMode ? 'bg-primary/10 ring-1 ring-primary/30 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+            )}
+            title="Pick region to edit"
+          >
+            <Crosshair className="h-3.5 w-3.5" strokeWidth={1.6} />
+          </button>
+        )}
+        {artifact && effectiveMode !== 'present' && isFeatureEnabled('clickThrough') && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!walkMode && artifact && !artifactHasFlowLinks(artifact)) {
+                toast('No flow links — ask for data-goto screens', 'warn');
+              }
+              setWalkMode((v) => {
+                const next = !v;
+                if (next) setPickMode(false);
+                return next;
+              });
+            }}
+            className={cn(
+              'h-7 w-7 grid place-items-center rounded-md transition-colors',
+              walkMode ? 'bg-primary/10 ring-1 ring-primary/30 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+            )}
+            title="Walk prototype (click data-goto links)"
+          >
+            <Footprints className="h-3.5 w-3.5" strokeWidth={1.6} />
+          </button>
         )}
         {artifact && (
           <button
@@ -498,6 +679,14 @@ export function PreviewPane({
               { label: 'Reload preview',    icon: <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.6} />, onClick: reloadPreviews,     disabled: !artifact, group: 'view' },
               { label: 'Toggle source',     icon: <Code className="h-3.5 w-3.5" strokeWidth={1.6} />,         active: showCode, onClick: () => setShowCode((v) => !v), disabled: !artifact, group: 'view' },
               { label: 'Detach preview',    icon: <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.6} />, onClick: detach,             disabled: !artifact, group: 'view' },
+              { label: 'Record preview…',   icon: <Video className="h-3.5 w-3.5" strokeWidth={1.6} />, onClick: () => setRecordOpen(true), disabled: !artifact, group: 'view' },
+              ...(isFeatureEnabled('variantCompareWizard') ? [{
+                label: 'Compare versions…',
+                icon: <GitCompare className="h-3.5 w-3.5" strokeWidth={1.6} />,
+                onClick: () => setCompareOpen(true),
+                disabled: !artifact || (project?.versions?.length ?? 0) < 1,
+                group: 'view' as const,
+              }] : []),
               { label: 'Critique (5-dim)',  icon: <ScanSearch className="h-3.5 w-3.5" strokeWidth={1.6} />,   onClick: runCritique,        disabled: !artifact, group: 'view' },
               { label: 'Fork as new study', icon: <GitFork className="h-3.5 w-3.5" strokeWidth={1.6} />,      onClick: fork,               disabled: !artifact, group: 'project' },
               { label: 'Import project',    icon: <Upload className="h-3.5 w-3.5" strokeWidth={1.6} />,       onClick: importProjectZip,   group: 'project' },
@@ -508,39 +697,70 @@ export function PreviewPane({
       </div>
 
       <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-        {!srcDocsBySurface ? (
-          <div className="flex-1 grid place-items-center">
-            <PreviewEmpty />
-          </div>
-        ) : showCode ? (
-          <pre className="flex-1 m-4 plate rounded-xl p-4 text-[11px] font-mono leading-relaxed overflow-auto whitespace-pre-wrap min-h-0">
-            {activeSrcDoc}
-          </pre>
-        ) : (
-          <>
-            <div className="relative flex-1 min-h-0 w-full overflow-hidden">
-              {activeSurfaces.map((id) => (
-                <DevicePreviewFrame
-                  key={`${id}-${reloadGen}`}
-                  surface={id}
-                  mode={effectiveMode}
-                  srcDoc={srcDocsBySurface[id]}
-                  setIframeRef={(el) => { iframeRefs.current[id] = el; }}
-                  visible={desktopOnly || surface === id}
-                  constrainToViewport={skillId === 'dashboard'}
-                  lockScroll={desktopOnly}
+        <AnimatePresence mode="wait">
+          {loading && !srcDocsBySurface ? (
+            <motion.div
+              key="loading"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex-1 grid place-items-center"
+            >
+              <PreviewLoading phase={loadingPhase} progress={loadingProgress} />
+            </motion.div>
+          ) : !srcDocsBySurface ? (
+            <motion.div
+              key="empty"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex-1 grid place-items-center"
+            >
+              <PreviewEmpty />
+            </motion.div>
+          ) : showCode ? (
+            <motion.pre
+              key="code"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex-1 m-4 plate rounded-xl p-4 text-[11px] font-mono leading-relaxed overflow-auto whitespace-pre-wrap min-h-0"
+            >
+              {activeSrcDoc}
+            </motion.pre>
+          ) : (
+            <motion.div
+              key="frame"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+              className="flex-1 min-h-0 flex flex-col"
+            >
+              <div className="relative flex-1 min-h-0 w-full overflow-hidden">
+                {activeSurfaces.map((id) => (
+                  <DevicePreviewFrame
+                    key={`${id}-${reloadGen}`}
+                    surface={id}
+                    mode={effectiveMode}
+                    srcDoc={srcDocsBySurface[id]}
+                    setIframeRef={(el) => { iframeRefs.current[id] = el; }}
+                    visible={desktopOnly || surface === id}
+                    constrainToViewport={skillId === 'dashboard'}
+                    lockScroll={desktopOnly}
+                  />
+                ))}
+              </div>
+              {desktopOnly && artifact && (
+                <DeckSlideFooter
+                  nav={navState}
+                  onPrev={() => navigateSlide({ dir: 'prev' })}
+                  onNext={() => navigateSlide({ dir: 'next' })}
                 />
-              ))}
-            </div>
-            {desktopOnly && artifact && (
-              <DeckSlideFooter
-                nav={navState}
-                onPrev={() => navigateSlide({ dir: 'prev' })}
-                onNext={() => navigateSlide({ dir: 'next' })}
-              />
-            )}
-          </>
-        )}
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       <DiffDialog
@@ -549,6 +769,16 @@ export function PreviewPane({
         bId={diff?.b ?? null}
         onClose={() => setDiff(null)}
       />
+      <RecordPreviewDialog
+        open={recordOpen}
+        surface={surface}
+        effectiveMode={effectiveMode}
+        onClose={() => setRecordOpen(false)}
+        onRecord={(opts) => void runPreviewRecord(opts)}
+      />
+      {isFeatureEnabled('variantCompareWizard') && (
+        <VariantCompareDialog open={compareOpen} onClose={() => setCompareOpen(false)} />
+      )}
     </section>
   );
 }

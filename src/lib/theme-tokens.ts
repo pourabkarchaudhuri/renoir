@@ -54,9 +54,13 @@ export function injectThemeStyle(html: string, css: string): string {
     'i',
   );
 
-  if (existing.test(html)) return html.replace(existing, tag);
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (m) => `${m}\n  ${tag}`);
+  let out = existing.test(html) ? html.replace(existing, '') : html;
+  // Append at end of <head> so theme tokens override earlier template :root blocks.
+  if (/<\/head>/i.test(out)) {
+    return out.replace(/<\/head>/i, `  ${tag}\n</head>`);
   }
-  return `${tag}\n${html}`;
+  if (/<head[^>]*>/i.test(out)) {
+    return out.replace(/<head[^>]*>/i, (m) => `${m}\n  ${tag}`);
+  }
+  return `${tag}\n${out}`;
 }

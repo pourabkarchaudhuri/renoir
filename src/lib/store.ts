@@ -4,6 +4,7 @@ import type {
   PromptTemplate, VisualDirection, AgentRecord, TemplateRecord,
 } from '@/types/global';
 import { hydrateProject, switchSkillSession, syncActiveSession, patchSkillSession, getSkillSession, streamStateForSkill, conversationForSkill, withInProgressAssistant, applySession, loadSession, projectHasSkillWork, clearInheritedStudyTitle } from '@/lib/skill-sessions';
+import { extractArtifact } from '@/lib/prompt';
 import { loadPreviewSurface, savePreviewSurface, type PreviewSurface } from '@/lib/preview-surfaces';
 import { saveWorkspaceSnapshot } from '@/lib/workspace-persist';
 
@@ -68,6 +69,10 @@ interface UIState {
   toggleRail: () => void;
   previewSurface: PreviewSurface;
   setPreviewSurface: (s: PreviewSurface) => void;
+  a11yPanelOpen: boolean;
+  setA11yPanelOpen: (v: boolean) => void;
+  activeFlowScreenId: string | null;
+  setActiveFlowScreenId: (id: string | null) => void;
 }
 
 const initialTheme = (typeof localStorage !== 'undefined' && localStorage.getItem('renoir.theme')) === 'light' ? 'light' : 'dark';
@@ -190,6 +195,10 @@ export const useUI = create<UIState>((set, get) => ({
     savePreviewSurface(s);
     set({ previewSurface: s });
   },
+  a11yPanelOpen: false,
+  setA11yPanelOpen: (v) => set({ a11yPanelOpen: v }),
+  activeFlowScreenId: null,
+  setActiveFlowScreenId: (id) => set({ activeFlowScreenId: id }),
 }));
 
 interface CatalogState {
@@ -311,36 +320,57 @@ export const useStudio = create<StudioState>((set, get) => ({
       });
       return;
     }
-    const skillId = rec.skillId ?? get().selectedSkillId;
+    const prev = get();
+    const skillId = rec.skillId ?? prev.selectedSkillId;
     const synced = syncActiveSession(rec, skillId);
     const project = hydrateProject(synced);
     const session = getSkillSession(project, skillId);
     const streamingSkillId = Object.entries(project.skillSessions ?? {}).find(([, s]) => s.isStreaming)?.[0]
-      ?? (session.isStreaming ? skillId : undefined);
+      ?? (session.isStreaming ? skillId : undefined)
+      ?? (prev.projectId === project.id && prev.isStreaming ? prev.streamingSkillId : undefined);
     const stream = streamStateForSkill(
       streamingSkillId ? getSkillSession(project, streamingSkillId) : session,
-      streamingSkillId === skillId,
+      Boolean(streamingSkillId && streamingSkillId === skillId),
     );
+
+    // Mid-send project patches (staged preview) must not drop the in-flight
+    // conversation binding — otherwise all LLM deltas are discarded.
+    const sessionConversationId = streamingSkillId
+      ? getSkillSession(project, streamingSkillId).conversationId
+      : getSkillSession(project, skillId).conversationId;
+    const sameProject = prev.projectId === project.id;
+    const activeConversationId = sessionConversationId
+      ?? (sameProject ? prev.activeConversationId : undefined);
+
+    // Keep the session conversationId in sync when we preserved a live binding.
+    let projectOut = project;
+    if (activeConversationId && skillId) {
+      const sess = getSkillSession(projectOut, skillId);
+      if (sess.conversationId !== activeConversationId) {
+        projectOut = patchSkillSession(projectOut, skillId, { conversationId: activeConversationId });
+      }
+    }
+
     set({
-      projectId: project.id,
-      project,
-      selectedSkillId: project.skillId ?? get().selectedSkillId,
-      selectedDesignSystemId: project.designSystemId,
-      selectedDirectionId: project.visualDirectionId,
-      selectedAgentId: project.agentId || 'byok',
+      projectId: projectOut.id,
+      project: projectOut,
+      selectedSkillId: projectOut.skillId ?? prev.selectedSkillId,
+      selectedDesignSystemId: projectOut.designSystemId,
+      selectedDirectionId: projectOut.visualDirectionId,
+      selectedAgentId: projectOut.agentId || 'byok',
       questionAnswers: {},
       streamingSkillId,
-      activeConversationId: streamingSkillId
-        ? getSkillSession(project, streamingSkillId).conversationId
-        : undefined,
-      pendingAssistant: stream.pendingAssistant,
-      isStreaming: stream.isStreaming,
-      streamStatus: stream.streamStatus,
-      retryNote: stream.retryNote,
+      activeConversationId,
+      pendingAssistant: stream.pendingAssistant || (sameProject && streamingSkillId === skillId ? prev.pendingAssistant : ''),
+      isStreaming: stream.isStreaming || Boolean(sameProject && prev.isStreaming && streamingSkillId),
+      streamStatus: stream.streamStatus !== 'idle'
+        ? stream.streamStatus
+        : (sameProject && prev.isStreaming ? prev.streamStatus : 'idle'),
+      retryNote: stream.retryNote ?? (sameProject ? prev.retryNote : undefined),
     });
     saveWorkspaceSnapshot({
-      projectId: project.id,
-      skillId: project.skillId ?? get().selectedSkillId,
+      projectId: projectOut.id,
+      skillId: projectOut.skillId ?? prev.selectedSkillId,
       route: useUI.getState().route,
     });
   },
@@ -568,9 +598,9 @@ export const useStudio = create<StudioState>((set, get) => ({
       conversationId: undefined,
     });
 
-    const m = finalMsg.content.match(/<artifact>([\s\S]*?)<\/artifact>/i);
-    if (m) {
-      const html = m[1].trim();
+    const art = extractArtifact(finalMsg.content);
+    if (art?.complete) {
+      const html = art.html;
       const forSave = applySession(syncActiveSession({
         ...project,
         conversation: conv,

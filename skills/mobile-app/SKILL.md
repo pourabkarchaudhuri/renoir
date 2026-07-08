@@ -100,3 +100,4 @@ One sentence before describing what's there. Stop after `</artifact>`.
 - **Numerics in mono** via `.num` class.
 - **Display in serif** via `var(--font-display)`.
 - **No external images** — use `.ph-img` placeholders.
+- **`data-screen-id` + `data-goto`** on navigable regions when the brief implies multiple screens.

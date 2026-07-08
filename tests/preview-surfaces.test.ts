@@ -9,6 +9,7 @@ import {
   measurePreviewContainer,
   presentHeightForWidth,
   previewSurfacesForSkill,
+  scaledPreviewSize,
   scrollFrameHeight,
 } from '../src/lib/preview-surfaces';
 
@@ -95,6 +96,26 @@ describe('preview-surfaces', () => {
   it('frameDimensions uses 16:9 for present mode', () => {
     expect(frameDimensions('desktop', 'present')).toEqual({ w: 1280, h: 720 });
     expect(frameDimensions('phone', 'scroll')).toEqual({ w: 390, h: 844 });
+  });
+
+  it('scaledPreviewSize keeps the selected device resolution aspect ratio', () => {
+    for (const id of PREVIEW_SURFACE_ORDER) {
+      for (const mode of ['scroll', 'present'] as const) {
+        const frame = frameDimensions(id, mode);
+        const sized = scaledPreviewSize(640, 480, id, mode, 0);
+        expect(sized.deviceW).toBe(frame.w);
+        expect(sized.deviceH).toBe(frame.h);
+        expect(sized.displayW / sized.displayH).toBeCloseTo(frame.w / frame.h, 5);
+        expect(sized.displayW).toBeLessThanOrEqual(640 + 0.01);
+        expect(sized.displayH).toBeLessThanOrEqual(480 + 0.01);
+      }
+    }
+  });
+
+  it('scaledPreviewSize does not grow with scroll content height probes', () => {
+    const scroll = scaledPreviewSize(900, 700, 'phone', 'scroll', 0);
+    expect(scroll.deviceH).toBe(PREVIEW_SURFACES.phone.h);
+    expect(scroll.deviceW).toBe(PREVIEW_SURFACES.phone.w);
   });
 
   it('product-deck locks preview to desktop only', () => {

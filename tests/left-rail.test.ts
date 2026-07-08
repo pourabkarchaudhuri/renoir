@@ -45,6 +45,13 @@ describe('LeftRail — Import/Export removal', () => {
   });
 });
 
+describe('LeftRail — prompt tab delete', () => {
+  it('creates a new prompt tab when the last active prompt is deleted', () => {
+    expect(leftRailSource).toMatch(/openNewPromptTab/);
+    expect(leftRailSource).not.toMatch(/setProject\(null\)/);
+  });
+});
+
 describe('LeftRail — ByokInline integration', () => {
   it('imports ByokInline', () => {
     expect(leftRailSource).toMatch(/import\s+.*ByokInline.*from/);

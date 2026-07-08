@@ -8,139 +8,185 @@
     :root {
       --bg: #fafaf9; --fg: #1c1b1a; --muted: #6b6964; --border: #e6e4e0;
       --accent: #c96442; --surface: #ffffff;
+      --chip-feat: color-mix(in oklch, var(--accent) 18%, var(--surface));
+      --chip-fix: color-mix(in oklch, var(--muted) 12%, var(--surface));
+      --chip-perf: color-mix(in oklch, #3b82f6 14%, var(--surface));
+      --chip-break: color-mix(in oklch, #dc2626 12%, var(--surface));
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 -apple-system, system-ui, sans-serif; }
+    .marketing-screen { min-height: 100dvh; }
     .wrap { max-width: 1080px; margin: 0 auto; padding: 0 32px; }
-    header { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; }
-    .logo { font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
-    nav a { color: var(--fg); text-decoration: none; margin-left: 22px; font-size: 14px; }
+    .site-nav {
+      position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center;
+      padding: 16px 32px; background: color-mix(in oklch, var(--bg) 88%, transparent); backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border);
+    }
+    .logo { font-weight: 600; font-size: 17px; letter-spacing: -0.01em; cursor: pointer; background: none; border: none; font: inherit; color: var(--fg); }
+    .site-nav nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .site-nav a, .site-nav button.nav-link {
+      color: var(--fg); text-decoration: none; font-size: 14px; background: none; border: none; cursor: pointer; font: inherit; padding: 8px 12px;
+    }
+    .site-nav a:hover, .site-nav button.nav-link:hover { color: var(--accent); }
     button { font: inherit; cursor: pointer; padding: 11px 20px; border-radius: 8px; font-weight: 500; }
     .btn-primary { background: var(--accent); color: white; border: 1px solid var(--accent); }
     .btn-secondary { background: transparent; color: var(--fg); border: 1px solid var(--border); }
-    .btn-link { background: transparent; border: none; color: var(--accent); padding: 11px 0; font-weight: 500; cursor: pointer; }
-    section { padding: 80px 0; }
-    .hero { padding: 100px 0; }
-    .hero h1 { font-size: clamp(44px, 6vw, 76px); line-height: 1.05; letter-spacing: -0.02em; max-width: 17ch; margin: 0 0 22px; }
+    .btn-link { background: transparent; border: none; color: var(--accent); padding: 11px 0; font-weight: 500; }
+    section.block { padding: 80px 0; }
+    .hero { padding: 80px 0 100px; }
+    .hero h1 { font-family: Georgia, 'Iowan Old Style', serif; font-size: clamp(44px, 6vw, 76px); line-height: 1.05; letter-spacing: -0.02em; max-width: 17ch; margin: 0 0 22px; }
     .hero p { font-size: 19px; color: var(--muted); max-width: 56ch; margin: 0 0 36px; }
-    .hero .cta { display: flex; gap: 12px; }
+    .hero .cta { display: flex; gap: 12px; flex-wrap: wrap; }
     .features { background: var(--surface); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
     .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
-    @media (max-width: 800px) { .feature-grid { grid-template-columns: 1fr; } }
-    .feature h3 { font-size: 18px; margin: 0 0 8px; letter-spacing: -0.01em; }
+    .feature h3 { font-size: 18px; margin: 0 0 8px; }
     .feature .num { font-family: ui-monospace, monospace; color: var(--accent); font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 12px; display: block; }
     .feature p { margin: 0; color: var(--muted); font-size: 14.5px; }
     .proof { text-align: center; }
     .proof h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); margin: 0 0 28px; }
-    .logos { display: flex; justify-content: center; gap: 56px; flex-wrap: wrap; opacity: 0.6; font-weight: 600; font-size: 17px; letter-spacing: -0.01em; }
-    .pricing h2 { text-align: center; font-size: 36px; margin: 0 0 12px; letter-spacing: -0.02em; }
-    .pricing .lede { text-align: center; color: var(--muted); margin: 0 0 48px; }
+    .logos { display: flex; justify-content: center; gap: 56px; flex-wrap: wrap; opacity: 0.6; font-weight: 600; font-size: 17px; }
+    .pricing h2 { text-align: center; font-family: Georgia, serif; font-size: 36px; margin: 0 0 12px; }
+    .pricing .lede { text-align: center; color: var(--muted); margin: 0 0 24px; }
+    .toggle { text-align: center; margin-bottom: 40px; font-size: 14px; color: var(--muted); }
+    .toggle strong { color: var(--fg); }
     .tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
-    @media (max-width: 800px) { .tiers { grid-template-columns: 1fr; } }
     .tier { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 32px; }
-    .tier.featured { border-color: var(--accent); position: relative; }
-    .tier.featured::before { content: 'Recommended'; position: absolute; top: -12px; left: 24px; background: var(--accent); color: white; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 500; }
-    .tier h3 { margin: 0 0 8px; font-size: 18px; }
-    .tier .price { font-size: 40px; letter-spacing: -0.02em; margin: 6px 0 16px; }
-    .tier .price small { font-size: 14px; color: var(--muted); font-weight: 400; }
+    .tier.featured { border-color: var(--accent); position: relative; transform: scale(1.02); }
+    .tier.featured::before { content: 'Recommended'; position: absolute; top: -12px; left: 24px; background: var(--accent); color: white; padding: 3px 10px; border-radius: 999px; font-size: 11px; }
+    .tier h3 { margin: 0 0 8px; }
+    .tier .price { font-family: ui-monospace, monospace; font-size: 40px; margin: 6px 0 16px; }
+    .tier .price small { font-size: 14px; color: var(--muted); }
     .tier ul { list-style: none; padding: 0; margin: 16px 0 24px; color: var(--muted); font-size: 14px; }
     .tier ul li { padding: 5px 0; border-top: 1px solid var(--border); }
-    .tier ul li:first-child { border-top: none; }
+    .quote { max-width: 640px; margin: 0 auto; text-align: center; font-family: Georgia, serif; font-size: 24px; line-height: 1.4; font-style: italic; }
+    .quote-author { text-align: center; color: var(--muted); font-size: 14px; margin-top: 16px; }
+    .faq { max-width: 640px; margin: 0 auto; }
+    .faq details { border-top: 1px solid var(--border); padding: 16px 0; }
+    .faq summary { font-weight: 500; cursor: pointer; }
+    .faq p { color: var(--muted); margin: 12px 0 0; font-size: 14px; }
     .closing { background: var(--accent); color: white; text-align: center; }
-    .closing h2 { font-size: 38px; letter-spacing: -0.02em; margin: 0 0 14px; }
+    .closing h2 { font-family: Georgia, serif; font-size: 38px; margin: 0 0 14px; }
     .closing p { opacity: 0.85; margin: 0 0 28px; }
     .closing button { background: white; color: var(--accent); border: none; }
-    footer { padding: 28px 0; color: var(--muted); font-size: 13px; text-align: center; }
+    .page-foot { padding: 28px 0; color: var(--muted); font-size: 13px; text-align: center; }
+    .cross-links { text-align: center; padding: 24px 0 48px; font-size: 14px; }
+    .cross-links button { color: var(--accent); background: none; border: none; font: inherit; cursor: pointer; margin: 0 16px; }
+    /* Changelog */
+    .changelog-head { padding: 48px 0 24px; }
+    .changelog-head h1 { font-family: Georgia, serif; font-size: 42px; margin: 0 0 8px; }
+    .changelog-head .meta { color: var(--muted); font-size: 14px; display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+    .filters { display: flex; gap: 8px; margin: 24px 0 40px; flex-wrap: wrap; }
+    .filters span { padding: 6px 14px; border-radius: 999px; font-size: 13px; border: 1px solid var(--border); }
+    .filters span.active { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+    .release { border-top: 1px solid var(--border); padding: 32px 0; }
+    .release-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 16px; }
+    .release-head .ver { font-family: ui-monospace, monospace; font-size: 20px; font-weight: 600; }
+    .release-head .date { font-family: ui-monospace, monospace; font-size: 13px; color: var(--muted); }
+    .chip { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 4px; font-family: ui-monospace, monospace; }
+    .chip-feat { background: var(--chip-feat); }
+    .chip-fix { background: var(--chip-fix); }
+    .chip-perf { background: var(--chip-perf); }
+    .chip-break { background: var(--chip-break); }
+    .release ul { margin: 12px 0 0; padding-left: 20px; color: var(--muted); }
+    .release ul li { margin: 6px 0; }
+    .shot { height: 160px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--muted)); opacity: 0.35; margin-top: 16px; }
+    /* Blog */
+    .blog-wrap { max-width: 680px; margin: 0 auto; padding: 48px 32px 96px; font-family: Georgia, 'Iowan Old Style', serif; font-size: 18px; line-height: 1.65; }
+    .blog-wrap .site-nav { margin: -48px -32px 48px; padding-left: 32px; padding-right: 32px; }
+    .eyebrow { font-family: -apple-system, system-ui, sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 14px; }
+    .blog-wrap h1 { font-size: clamp(36px, 5vw, 52px); line-height: 1.1; margin: 0 0 20px; }
+    .byline { font-family: -apple-system, system-ui, sans-serif; font-size: 14px; color: var(--muted); margin: 0 0 32px; display: flex; align-items: center; gap: 12px; }
+    .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); opacity: 0.2; }
+    .lede { font-size: 22px; line-height: 1.5; margin: 0 0 32px; font-style: italic; }
+    .hero-figure { aspect-ratio: 16/9; background: linear-gradient(135deg, var(--accent), var(--muted)); border-radius: 8px; margin-bottom: 40px; opacity: 0.85; }
+    .fig-cap { font-family: -apple-system, system-ui, sans-serif; font-size: 13px; color: var(--muted); margin-top: 8px; }
+    .blog-wrap p { margin: 24px 0; }
+    .blog-wrap h2 { font-size: 28px; margin: 48px 0 12px; line-height: 1.2; }
+    .pull { font-size: 26px; line-height: 1.35; border-left: 3px solid var(--accent); padding-left: 24px; margin: 40px 0; font-style: italic; }
+    .blog-wrap blockquote { margin: 32px 0; padding: 0 24px; color: var(--muted); font-style: italic; }
+    .author-box { font-family: -apple-system, system-ui, sans-serif; display: flex; gap: 16px; margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--border); font-size: 15px; }
+    .author-box .avatar { width: 48px; height: 48px; display: grid; place-items: center; font-weight: 600; color: var(--accent); opacity: 1; background: var(--chip-feat); }
+    .related { font-family: -apple-system, system-ui, sans-serif; margin-top: 64px; }
+    .related h3 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 20px; }
+    .related-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .related-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); text-align: left; }
+    .related-card .thumb { height: 80px; background: linear-gradient(120deg, var(--border), var(--chip-feat)); }
+    .related-card h4 { font-size: 15px; margin: 12px 14px 4px; color: var(--fg); }
+    .related-card p { font-size: 13px; color: var(--muted); margin: 0 14px 8px; }
+    .related-card .date { font-size: 11px; color: var(--muted); margin: 0 14px 14px; font-family: ui-monospace, monospace; }
+    @media (max-width: 768px) {
+      .feature-grid, .tiers, .related-grid { grid-template-columns: 1fr; }
+      .tier.featured { transform: none; }
+      .site-nav nav a:not([data-goto]) { display: none; }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .hero h1 { animation: fadeUp 0.6s ease-out both; }
+      @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+    }
   </style>
 </head>
 <body>
+
+<!-- ═══ SCREEN 1: LANDING ═══ -->
+<section data-screen-id="landing" data-screen-label="Landing" class="marketing-screen" data-od-id="landing">
+  <header class="site-nav" data-od-id="topnav">
+    <button class="logo" data-goto="landing">◰ Filebase</button>
+    <nav>
+      <button class="nav-link" data-goto="landing">Product</button>
+      <a href="#pricing">Pricing</a>
+      <button class="nav-link" data-goto="changelog">Changelog</button>
+      <button class="nav-link" data-goto="blog">Blog</button>
+      <button class="btn-secondary" style="margin-left: 4px;">Sign in</button>
+    </nav>
+  </header>
+
   <div class="wrap">
-    <header data-od-id="topnav">
-      <span class="logo">◰ Filebase</span>
-      <nav>
-        <a href="#features">Features</a>
-        <a href="#pricing">Pricing</a>
-        <a href="#docs">Docs</a>
-        <button class="btn-secondary" style="margin-left: 12px;">Sign in</button>
-      </nav>
-    </header>
-    <section class="hero" data-od-id="hero">
+    <section class="hero block" data-od-id="hero">
       <h1>File sync that doesn't eat your bandwidth.</h1>
       <p>Block-level deltas, end-to-end encryption, and a pricing model that doesn't punish you for working with video.</p>
       <div class="cta">
         <button class="btn-primary">Get Filebase</button>
-        <button class="btn-link">Read the whitepaper →</button>
+        <button class="btn-link" data-goto="blog">Read the engineering blog →</button>
       </div>
     </section>
   </div>
 
-  <section class="features" id="features" data-od-id="features">
+  <section class="features block" id="features" data-od-id="features">
     <div class="wrap feature-grid">
-      <div class="feature">
-        <span class="num">01</span>
-        <h3>Block-level diffs</h3>
-        <p>Edit a 4 GB Final Cut project? We sync the 200 KB you changed. Not the whole file.</p>
-      </div>
-      <div class="feature">
-        <span class="num">02</span>
-        <h3>End-to-end encrypted</h3>
-        <p>Files are encrypted on your laptop before they leave. We can't read them. Neither can law enforcement, by design.</p>
-      </div>
-      <div class="feature">
-        <span class="num">03</span>
-        <h3>Honest pricing</h3>
-        <p>One flat rate for unlimited storage. No "fair use" clauses. No throttling at 90%.</p>
-      </div>
+      <div class="feature"><span class="num">01</span><h3>Block-level diffs</h3><p>Edit a 4 GB Final Cut project? We sync the 200 KB you changed — not the whole file.</p></div>
+      <div class="feature"><span class="num">02</span><h3>End-to-end encrypted</h3><p>Files are encrypted on your laptop before they leave. We can't read them — by design.</p></div>
+      <div class="feature"><span class="num">03</span><h3>Honest pricing</h3><p>One flat rate for unlimited storage. No fair-use clauses. No throttling at 90%.</p></div>
     </div>
   </section>
 
-  <section class="proof wrap" data-od-id="proof">
+  <section class="proof block wrap" data-od-id="proof">
     <h2>Used by teams at</h2>
     <div class="logos"><span>Anthropic</span><span>Stripe</span><span>Linear</span><span>Vercel</span><span>Cursor</span></div>
   </section>
 
-  <section class="pricing wrap" id="pricing" data-od-id="pricing">
+  <section class="pricing block wrap" id="pricing" data-od-id="pricing">
     <h2>Pricing</h2>
     <p class="lede">Pick a tier. Switch or cancel any time.</p>
+    <p class="toggle"><strong>Monthly</strong> · Annual (save 20%)</p>
     <div class="tiers">
-      <div class="tier">
-        <h3>Solo</h3>
-        <div class="price">$8<small>/mo</small></div>
-        <p style="color: var(--muted); margin: 0;">For individuals.</p>
-        <ul>
-          <li>1 TB storage</li>
-          <li>Block-level sync</li>
-          <li>Email support</li>
-        </ul>
-        <button class="btn-secondary" style="width: 100%;">Choose Solo</button>
-      </div>
-      <div class="tier featured">
-        <h3>Team</h3>
-        <div class="price">$14<small>/seat/mo</small></div>
-        <p style="color: var(--muted); margin: 0;">For teams up to 50.</p>
-        <ul>
-          <li>5 TB pooled storage</li>
-          <li>Shared folders & roles</li>
-          <li>Priority support</li>
-          <li>Audit log</li>
-        </ul>
-        <button class="btn-primary" style="width: 100%;">Choose Team</button>
-      </div>
-      <div class="tier">
-        <h3>Enterprise</h3>
-        <div class="price">Custom</div>
-        <p style="color: var(--muted); margin: 0;">SSO, on-prem keys, SLA.</p>
-        <ul>
-          <li>Unlimited storage</li>
-          <li>SAML / SCIM</li>
-          <li>Dedicated support</li>
-        </ul>
-        <button class="btn-secondary" style="width: 100%;">Talk to sales</button>
-      </div>
+      <div class="tier"><h3>Solo</h3><div class="price">$8<small>/mo</small></div><ul><li>1 TB storage</li><li>Block-level sync</li><li>Email support</li></ul><button class="btn-secondary" style="width:100%">Choose Solo</button></div>
+      <div class="tier featured"><h3>Team</h3><div class="price">$14<small>/seat/mo</small></div><ul><li>5 TB pooled</li><li>Shared folders</li><li>Priority support</li><li>Audit log</li></ul><button class="btn-primary" style="width:100%">Choose Team</button></div>
+      <div class="tier"><h3>Enterprise</h3><div class="price">Custom</div><ul><li>Unlimited storage</li><li>SAML / SCIM</li><li>Dedicated support</li></ul><button class="btn-secondary" style="width:100%">Talk to sales</button></div>
     </div>
   </section>
 
-  <section class="closing" data-od-id="closing">
+  <section class="block wrap" data-od-id="testimonial">
+    <p class="quote">"Filebase pays for itself in the first month. We were going to hire DevOps to babysit sync — instead we just switched."</p>
+    <p class="quote-author">— Mira Hassan, CTO at Northwind Studios</p>
+  </section>
+
+  <section class="block wrap faq" data-od-id="faq">
+    <details><summary>How is this different from Dropbox?</summary><p>Block-level diffs mean we only move the bytes that changed. For video and design files, that's often 100× less bandwidth.</p></details>
+    <details><summary>Can I self-host?</summary><p>Enterprise tier includes on-prem key management and optional dedicated infrastructure.</p></details>
+    <details><summary>What happens if I cancel?</summary><p>Export everything. No lock-in. Your encryption keys stay yours.</p></details>
+  </section>
+
+  <section class="closing block" data-od-id="closing">
     <div class="wrap">
       <h2>Sync less, ship more.</h2>
       <p>14-day free trial. No credit card needed.</p>
@@ -148,6 +194,131 @@
     </div>
   </section>
 
-  <footer class="wrap" data-od-id="footer">© Filebase · Privacy · Terms · Status</footer>
+  <div class="cross-links" data-od-id="cross-links">
+    <button data-goto="changelog">See changelog →</button>
+    <button data-goto="blog">Read the blog →</button>
+  </div>
+
+  <footer class="page-foot wrap" data-od-id="footer">© Filebase · Privacy · Terms · Status</footer>
+</section>
+
+<!-- ═══ SCREEN 2: CHANGELOG ═══ -->
+<section data-screen-id="changelog" data-screen-label="Changelog" class="marketing-screen" data-od-id="changelog">
+  <header class="site-nav">
+    <button class="logo" data-goto="landing">◰ Filebase</button>
+    <nav>
+      <button class="nav-link" data-goto="landing">Product</button>
+      <button class="nav-link" data-goto="changelog">Changelog</button>
+      <button class="nav-link" data-goto="blog">Blog</button>
+    </nav>
+  </header>
+
+  <div class="wrap">
+    <header class="changelog-head" data-od-id="changelog-header">
+      <h1>Changelog</h1>
+      <div class="meta"><span>Release notes for Filebase</span><span>RSS feed</span><span>Subscribe</span></div>
+    </header>
+
+    <div class="filters" data-od-id="changelog-filters">
+      <span class="active">All</span><span>Features</span><span>Fixes</span>
+    </div>
+
+    <div data-od-id="changelog-entries">
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.4.0</span><span class="date">Apr 27, 2026</span><span class="chip chip-feat">feat</span><span class="chip chip-perf">perf</span></div>
+        <ul>
+          <li>Sync engine v3 — content-defined chunker cuts post-edit wire bytes by 38× on Final Cut projects.</li>
+          <li>Per-folder bandwidth budgets for archive folders.</li>
+        </ul>
+        <div class="shot" aria-hidden="true"></div>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.3.2</span><span class="date">Apr 19, 2026</span><span class="chip chip-fix">fix</span></div>
+        <ul><li>Fixed race when two clients edit the same block within 200ms.</li><li>macOS Sonoma sleep/wake no longer stalls uploads.</li></ul>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.3.0</span><span class="date">Apr 04, 2026</span><span class="chip chip-feat">feat</span></div>
+        <ul><li>S3 + R2 dual-region replication with automatic failover (Enterprise).</li><li>Audit log export to CSV.</li></ul>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.2.1</span><span class="date">Mar 22, 2026</span><span class="chip chip-perf">perf</span></div>
+        <ul><li>Rust sync core P99 latency 38ms → 4ms on heavy uploaders.</li></ul>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.2.0</span><span class="date">Mar 08, 2026</span><span class="chip chip-feat">feat</span><span class="chip chip-break">breaking</span></div>
+        <ul><li>New CLI requires Filebase 2.2+ server. Migration wizard in app.</li><li>Team roles: Admin, Editor, Viewer.</li></ul>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.1.0</span><span class="date">Feb 14, 2026</span><span class="chip chip-feat">feat</span></div>
+        <ul><li>Windows native client (preview).</li><li>Shared link passwords + expiry.</li></ul>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ SCREEN 3: BLOG ═══ -->
+<section data-screen-id="blog" data-screen-label="Blog" class="marketing-screen" data-od-id="blog">
+  <div class="blog-wrap">
+    <header class="site-nav" data-od-id="blog-nav">
+      <button class="logo" data-goto="landing">◰ Filebase</button>
+      <nav>
+        <button class="nav-link" data-goto="landing">Product</button>
+        <button class="nav-link" data-goto="changelog">Changelog</button>
+        <button class="nav-link" data-goto="blog">Blog</button>
+      </nav>
+    </header>
+
+    <header data-od-id="article-header">
+      <div class="eyebrow">Engineering</div>
+      <h1>Why we rewrote our sync engine in Rust</h1>
+      <div class="byline"><div class="avatar" aria-hidden="true"></div><span>By Mira Hassan · April 22, 2026 · 8 min read</span></div>
+      <p class="lede">For two years our Go sync engine was good enough. Then video editors joined the customer list, and GC pauses we'd been ignoring became bug reports we couldn't ignore.</p>
+    </header>
+
+    <figure data-od-id="hero-figure">
+      <div class="hero-figure"></div>
+      <figcaption class="fig-cap">Block-level diff visualization — only changed chunks cross the wire.</figcaption>
+    </figure>
+
+    <article data-od-id="article-body">
+      <p>The decision wasn't sudden. We'd watched P99 latency creep for six months before admitting what the data said. Customers syncing 30 GB of project files in active sessions were the ones writing in.</p>
+      <p>Rewriting an entire sync engine sounds like the project startups are told never to do. We did it anyway.</p>
+
+      <h2>The trigger: GC pauses we couldn't fix</h2>
+      <p>Go's garbage collector is brilliant — and a tradeoff. Our hot path allocated short-lived buffers on every block diff. At scale, P99 pause crept past 50ms. Video teams needed under 5.</p>
+
+      <p class="pull">We can't fix this in Go. We can fix it in something without a GC.</p>
+
+      <h2>What we kept; what we threw out</h2>
+      <p>The CLI and control plane stayed in Go. The hot-loop diffing path became Rust behind a single FFI surface.</p>
+      <blockquote>Every cross-language boundary is an external API the day you ship it.</blockquote>
+
+      <h2>Results</h2>
+      <ul>
+        <li>P99 sync latency: 38ms → 4ms</li>
+        <li>Memory on heavy uploaders: down 62%</li>
+        <li>RFC to production: 11 weeks</li>
+      </ul>
+
+      <h2>What I'd do differently</h2>
+      <p>I'd generate FFI bindings from a schema instead of hand-rolling cgo wrappers. Two production incidents taught us that lesson.</p>
+    </article>
+
+    <footer class="author-box" data-od-id="author-footer">
+      <div class="avatar">MH</div>
+      <div><strong>Mira Hassan</strong> · Staff Engineer<br><span style="color:var(--muted)">Builds sync infrastructure at Filebase. Previously at a video codec startup.</span></div>
+    </footer>
+
+    <section class="related" data-od-id="related-posts">
+      <h3>Related posts</h3>
+      <div class="related-grid">
+        <article class="related-card"><div class="thumb"></div><h4>Encrypting blocks before they leave your laptop</h4><p>How we designed the E2E key hierarchy.</p><p class="date">Mar 12, 2026</p></article>
+        <article class="related-card"><div class="thumb"></div><h4>Bandwidth budgets for archive folders</h4><p>Cap egress per project without throttling editors.</p><p class="date">Feb 28, 2026</p></article>
+        <article class="related-card"><div class="thumb"></div><h4>Shipping sync engine v3</h4><p>Content-defined chunking in plain language.</p><p class="date">Jan 15, 2026</p></article>
+      </div>
+    </section>
+  </div>
+</section>
+
 </body>
 </html>

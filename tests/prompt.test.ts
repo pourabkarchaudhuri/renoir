@@ -3,6 +3,7 @@ import fc from 'fast-check';
 import {
   composeSystemPrompt, extractArtifact, extractQuestionForm,
   stripArtifact, inferPhase, hasLockedBrief, extractBriefFromConversation,
+  conversationForLlm,
 } from '../src/lib/prompt';
 import { listSkills, getSkill } from '../electron/library';
 
@@ -30,6 +31,31 @@ describe('prompt composer', () => {
     expect(r.system).toContain('# Product Deck requirements');
     expect(r.system).toContain('slide-visual');
     expect(r.system).toContain('12 slides');
+  });
+
+  it('injects marketing site layout contract when skill is saas-landing', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'saas-landing', name: 'SaaS Landing', category: 'web', emoji: '🚀', blurb: 'Multi-screen site.' },
+      primer: 'Three linked screens.',
+    });
+    expect(r.system).toContain('# SaaS Marketing Site — copy pass on staged shell');
+    expect(r.system).toContain('data-screen-id="landing"');
+    expect(r.system).toContain('"changelog"');
+    expect(r.system).toContain('"blog"');
+    expect(r.system).toContain('never <question-form>');
+  });
+
+  it('injects blog post layout contract when skill is blog-post', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'blog-post', name: 'Blog Post', category: 'doc', emoji: '✍️', blurb: 'Long-form article.' },
+      primer: 'Single-screen blog article.',
+    });
+    expect(r.system).toContain('# Blog Post — single-screen article');
+    expect(r.system).toContain('"masthead"');
+    expect(r.system).toContain('"article-header"');
+    expect(r.system).toContain('"article-body"');
+    expect(r.system).toContain('"related-posts"');
+    expect(r.system).toContain('never <question-form>');
   });
 
   it('injects design system tokens', () => {
@@ -137,6 +163,29 @@ field:goal | label:Goal | type:textarea
   });
   it('returns null when none', () => {
     expect(extractQuestionForm('blah')).toBeNull();
+  });
+});
+
+describe('conversationForLlm', () => {
+  it('strips artifacts from prior assistant turns', () => {
+    const msgs = [
+      { role: 'user', content: 'Build a blog' },
+      { role: 'assistant', content: 'Done.\n<artifact><html>old</html></artifact>' },
+      { role: 'user', content: 'Make it shorter' },
+    ];
+    const out = conversationForLlm(msgs);
+    expect(out[1].content).not.toContain('<html>');
+    expect(out[1].content).toBe('Done.');
+  });
+
+  it('keeps the latest assistant artifact when continuing', () => {
+    const partial = 'streaming\n<artifact><html>partial';
+    const msgs = [
+      { role: 'user', content: 'Build' },
+      { role: 'assistant', content: partial },
+    ];
+    const out = conversationForLlm(msgs, { keepLastArtifact: true });
+    expect(out[1].content).toBe(partial);
   });
 });
 
@@ -327,6 +376,7 @@ describe('composeSystemPrompt signature stability', () => {
     const exportedKeys = Object.keys(mod).sort();
     const expectedExports = [
       'composeSystemPrompt',
+      'conversationForLlm',
       'extractArtifact',
       'extractBriefFromConversation',
       'extractQuestionForm',

@@ -4,6 +4,7 @@ import { normalizeArtifactDocument } from '../src/lib/artifact-html';
 import {
   fixArtifactLintFindings,
   fixDashboardVw,
+  fixHtmlLang,
   fixImgAlt,
   fixNoopenerLinks,
 } from '../src/lib/artifact-lint-fix';
@@ -21,6 +22,12 @@ describe('artifact-lint-fix', () => {
     const html = '<a href="https://x.com" target="_blank">Open</a>';
     const out = fixNoopenerLinks(html);
     expect(out).toContain('rel="noopener noreferrer"');
+  });
+
+  it('adds lang to html element', () => {
+    const html = '<!doctype html><html><head><title>x</title></head><body></body></html>';
+    const out = fixHtmlLang(html);
+    expect(out).toMatch(/<html[^>]*\blang=["']en["']/i);
   });
 
   it('replaces 100vw in dashboards', () => {

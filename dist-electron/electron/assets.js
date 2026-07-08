@@ -69,6 +69,7 @@ export function listProjectAssets(projectId, opts) {
     audio.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     const storyboards = [];
     const hyperframes = [];
+    const recordingsDir = path.join(root, 'recordings');
     try {
         for (const ent of fs.readdirSync(root, { withFileTypes: true })) {
             if (!ent.isDirectory())
@@ -98,6 +99,26 @@ export function listProjectAssets(projectId, opts) {
                     videoUrl: videoPath ? urlFor(videoPath) : undefined,
                     firstFramePath: frames[0],
                     firstFrameUrl: frames[0] ? urlFor(frames[0]) : undefined,
+                    createdAt: st?.mtime?.toISOString?.() ?? new Date().toISOString(),
+                });
+            }
+        }
+        if (fs.existsSync(recordingsDir)) {
+            for (const ent of fs.readdirSync(recordingsDir, { withFileTypes: true })) {
+                if (!ent.isDirectory() || !ent.name.startsWith('recording-'))
+                    continue;
+                const full = path.join(recordingsDir, ent.name);
+                const framesDir = path.join(full, 'frames');
+                const frames = listFiles(framesDir, ['.png']).sort();
+                const videoPath = listFiles(full, ['.mp4'])[0];
+                const pngPath = listFiles(full, ['.png']).find((p) => !p.includes(`${path.sep}frames${path.sep}`));
+                const st = statSafe(full);
+                hyperframes.push({
+                    dir: full,
+                    videoPath,
+                    videoUrl: videoPath ? urlFor(videoPath) : undefined,
+                    firstFramePath: frames[0] ?? pngPath,
+                    firstFrameUrl: frames[0] ? urlFor(frames[0]) : pngPath ? urlFor(pngPath) : undefined,
                     createdAt: st?.mtime?.toISOString?.() ?? new Date().toISOString(),
                 });
             }

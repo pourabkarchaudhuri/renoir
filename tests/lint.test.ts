@@ -8,6 +8,15 @@ describe('lintArtifact', () => {
     expect(r.errors).toBeGreaterThanOrEqual(1);
   });
 
+  it('warns on missing html lang', () => {
+    const html = '<!doctype html><html><head><title>x</title></head><body><h1>x</h1></body></html>';
+    const r = lintArtifact(html);
+    const f = r.findings.find((x) => x.rule === 'html-lang');
+    expect(f).toBeTruthy();
+    expect(f?.category).toBe('structure');
+    expect(f?.fixable).toBe(true);
+  });
+
   it('rewards a complete simple doc', () => {
     const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width"><title>Hi</title></head>
       <body><main><h1>Hello</h1><img src="a.png" alt="ok"><button>Click</button></main></body></html>`;
@@ -83,6 +92,25 @@ describe('lintArtifact', () => {
       </section></body></html>`;
     const r = lintArtifact(html);
     expect(r.findings.some((f) => f.rule === 'dashboard-chart-distorted')).toBe(true);
+  });
+
+  it('warns when marketing site screens are missing', () => {
+    const html = `<!doctype html><html><body>
+      <section data-screen-id="landing"><a data-goto="changelog">Go</a></section>
+    </body></html>`;
+    const r = lintArtifact(html);
+    expect(r.findings.some((f) => f.rule === 'marketing-screens')).toBe(true);
+  });
+
+  it('passes marketing site lint for canonical example structure', () => {
+    const html = `<!doctype html><html><body>
+      <section data-screen-id="landing"><nav><button data-goto="changelog">Changelog</button></nav></section>
+      <section data-screen-id="changelog"></section>
+      <section data-screen-id="blog"></section>
+    </body></html>`;
+    const r = lintArtifact(html);
+    expect(r.findings.some((f) => f.rule === 'marketing-screens')).toBe(false);
+    expect(r.findings.some((f) => f.rule === 'marketing-flow-links')).toBe(false);
   });
 });
 

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Changelog — Filebase</title>
+  <style>
+    :root {
+      --bg: #fafaf9; --fg: #1c1b1a; --muted: #6b6964; --border: #e6e4e0;
+      --accent: #c96442; --surface: #ffffff;
+      --chip-feat: color-mix(in oklch, var(--accent) 18%, var(--surface));
+      --chip-fix: color-mix(in oklch, var(--muted) 12%, var(--surface));
+      --chip-perf: color-mix(in oklch, #3b82f6 14%, var(--surface));
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 -apple-system, system-ui, sans-serif; }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 0 32px 80px; }
+    header.top { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; border-bottom: 1px solid var(--border); margin-bottom: 48px; }
+    .logo { font-weight: 600; font-size: 17px; }
+    h1 { font-family: Georgia, serif; font-size: 42px; margin: 0 0 8px; }
+    .meta { color: var(--muted); font-size: 14px; display: flex; gap: 16px; flex-wrap: wrap; }
+    .filters { display: flex; gap: 8px; margin: 24px 0 40px; }
+    .filters span { padding: 6px 14px; border-radius: 999px; font-size: 13px; border: 1px solid var(--border); }
+    .filters span.active { background: var(--fg); color: var(--bg); }
+    .release { border-top: 1px solid var(--border); padding: 32px 0; }
+    .release-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; margin-bottom: 12px; }
+    .ver { font-family: ui-monospace, monospace; font-size: 20px; font-weight: 600; }
+    .date { font-family: ui-monospace, monospace; font-size: 13px; color: var(--muted); }
+    .chip { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 4px; font-family: ui-monospace, monospace; }
+    .chip-feat { background: var(--chip-feat); }
+    .chip-fix { background: var(--chip-fix); }
+    .chip-perf { background: var(--chip-perf); }
+    .release ul { margin: 0; padding-left: 20px; color: var(--muted); }
+    .shot { height: 140px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--muted)); opacity: 0.35; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="wrap" data-od-id="changelog">
+    <header class="top" data-od-id="changelog-header">
+      <span class="logo">◰ Filebase</span>
+      <span style="font-size:14px;color:var(--muted)">Changelog</span>
+    </header>
+    <h1>Changelog</h1>
+    <div class="meta"><span>Release notes</span><span>RSS</span><span>Subscribe</span></div>
+    <div class="filters" data-od-id="changelog-filters">
+      <span class="active">All</span><span>Features</span><span>Fixes</span>
+    </div>
+    <div data-od-id="changelog-entries">
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.4.0</span><span class="date">Apr 27, 2026</span><span class="chip chip-feat">feat</span><span class="chip chip-perf">perf</span></div>
+        <ul><li>Sync engine v3 — 38× fewer post-edit wire bytes on Final Cut projects.</li><li>Per-folder bandwidth budgets.</li></ul>
+        <div class="shot" aria-hidden="true"></div>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.3.2</span><span class="date">Apr 19, 2026</span><span class="chip chip-fix">fix</span></div>
+        <ul><li>Fixed race on concurrent block edits.</li><li>macOS sleep/wake upload stall resolved.</li></ul>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.3.0</span><span class="date">Apr 04, 2026</span><span class="chip chip-feat">feat</span></div>
+        <ul><li>S3 + R2 dual-region replication (Enterprise).</li><li>Audit log CSV export.</li></ul>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.2.1</span><span class="date">Mar 22, 2026</span><span class="chip chip-perf">perf</span></div>
+        <ul><li>Rust sync core P99: 38ms → 4ms.</li></ul>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.2.0</span><span class="date">Mar 08, 2026</span><span class="chip chip-feat">feat</span></div>
+        <ul><li>Team roles: Admin, Editor, Viewer.</li><li>CLI 2.2+ required — migration wizard included.</li></ul>
+      </article>
+      <article class="release">
+        <div class="release-head"><span class="ver">v2.1.0</span><span class="date">Feb 14, 2026</span><span class="chip chip-feat">feat</span></div>
+        <ul><li>Windows client preview.</li><li>Shared link passwords + expiry.</li></ul>
+      </article>
+    </div>
+  </div>
+</body>
+</html>

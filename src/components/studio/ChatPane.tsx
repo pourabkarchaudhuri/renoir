@@ -11,6 +11,7 @@ import type { AutoContinueState } from '@/lib/auto-continue';
 import { readFileAsAttachment, readClipboardImage, classify, MAX_ATTACHMENTS, type Attachment, summarizeAttachments } from '@/lib/attachments';
 import { ExpandableMessage } from '@/components/chrome/ExpandableMessage';
 import { syncActiveSession } from '@/lib/skill-sessions';
+import { pickEditDraft } from '@/lib/pick-target';
 import type { ProjectMessage } from '@/types/global';
 
 interface Props {
@@ -35,6 +36,24 @@ export function ChatPane({ onSend, onCancel, onRegenerate, onReloadPreview, hasP
   useEffect(() => {
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: 'smooth' });
   }, [project?.conversation.length, pending, questionForm]);
+
+  useEffect(() => {
+    const onPick = (e: Event) => {
+      const detail = (e as CustomEvent).detail as {
+        odId?: string;
+        tag?: string;
+        textPreview?: string;
+      };
+      if (!detail?.odId) return;
+      setDraft(pickEditDraft({
+        odId: detail.odId,
+        tag: detail.tag,
+        textPreview: detail.textPreview,
+      }));
+    };
+    window.addEventListener('renoir:pick-target', onPick);
+    return () => window.removeEventListener('renoir:pick-target', onPick);
+  }, [setDraft]);
 
   return (
     <section className="flex-1 flex flex-col min-w-0">

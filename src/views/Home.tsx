@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowRight, Sparkles, Zap, FolderOpen, ImageIcon } from 'lucide-react';
+import { ArrowRight, Sparkles, Zap, ImageIcon } from 'lucide-react';
 import { iconForSkill } from '@/lib/skill-icons';
 import { useCatalog, useStudio, useUI } from '@/lib/store';
 import { loadSession } from '@/lib/skill-sessions';
+import { ProjectStudiesSection } from '@/components/projects/ProjectStudiesSection';
 import type { ProjectRecord } from '@/types/global';
 import { cn } from '@/lib/cn';
 
@@ -30,40 +31,30 @@ export function Home() {
     setRoute('studio');
   };
 
+  const openProject = (p: ProjectRecord) => {
+    const skill = p.skillId || p.lastSkillId || 'web-prototype';
+    setProject(loadSession(p, skill));
+    setSkill(skill);
+    setRoute('studio');
+  };
+
+  const saveProjectMeta = async (p: ProjectRecord) => {
+    await window.renoir.saveProject(p);
+    const list = await window.renoir.listProjects();
+    setProjects(list);
+  };
+
   return (
     <div className="absolute inset-0 overflow-y-auto scroll-thin">
       <div className="max-w-[1100px] mx-auto px-10 pt-14 pb-24">
         <Hero onStart={() => startNew()} byokReady={Boolean(byok?.hasKey)} azureReady={Boolean(azure?.configured)} />
 
         {projects.length > 0 && (
-          <section className="mt-12">
-            <SectionTitle eyebrow="Continue" title="Recent studies" />
-            <div className="grid grid-cols-2 gap-4 mt-6">
-              {projects.slice(0, 6).map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    const skill = p.skillId || 'web-prototype';
-                    setProject(loadSession(p, skill));
-                    setSkill(skill);
-                    setRoute('studio');
-                  }}
-                  className="plate rounded-xl p-4 text-left group hover:-translate-y-[1px] transition-transform"
-                >
-                  <div className="flex items-center gap-3">
-                    <FolderOpen className="h-4 w-4 text-muted-foreground" strokeWidth={1.5} />
-                    <span className="font-medium tracking-tight text-[13px]">{p.name}</span>
-                    <span className="ml-auto text-[10px] uppercase tracking-[0.2em] text-muted-foreground/60">
-                      {timeAgo(p.updatedAt)}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-[11px] text-muted-foreground line-clamp-1">
-                    {p.conversation.at(-1)?.content?.slice(0, 120) || 'No messages yet.'}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
+          <ProjectStudiesSection
+            projects={projects}
+            onOpen={openProject}
+            onSaveProject={saveProjectMeta}
+          />
         )}
 
         <section className="mt-12">
@@ -232,16 +223,4 @@ function HeroArt() {
       </motion.div>
     </div>
   );
-}
-
-function timeAgo(iso: string): string {
-  const then = new Date(iso).getTime();
-  const diff = Math.max(0, Date.now() - then);
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  return `${d}d`;
 }

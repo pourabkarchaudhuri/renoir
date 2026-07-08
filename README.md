@@ -13,7 +13,12 @@ A local-first, opinionated design studio. Drop a brief, get a runnable artifact:
 - Question-form turn-1 brief lock.
 - Sandboxed iframe preview, phone / tablet / desktop frames.
 - Source-view toggle, save artifact to project workspace.
-- Lint badge: structural + a11y findings on the rendered HTML.
+- Lint badge + docked a11y panel (static lint + live iframe probe).
+- Project search, tags, and pin on Home.
+- Version diff at device resolution; compare versions wizard.
+- Pick mode (scoped edit) and Walk mode (click-through `data-goto` flows).
+- Flow map in left rail for multi-screen prototypes.
+- Preview recording (offscreen MP4/PNG).
 - Save artifact as a reusable template.
 
 ### Routing

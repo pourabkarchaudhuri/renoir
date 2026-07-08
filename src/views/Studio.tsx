@@ -4,13 +4,16 @@ import { ChatPane } from '@/components/studio/ChatPane';
 import { PreviewPane } from '@/components/studio/PreviewPane';
 import { LeftRail } from '@/components/studio/LeftRail';
 import { Splitter } from '@/components/studio/Splitter';
-import { extractArtifact, extractQuestionForm, composeSystemPrompt, hasLockedBrief, extractBriefFromConversation } from '@/lib/prompt';
+import { extractArtifact, extractQuestionForm, composeSystemPrompt, hasLockedBrief, extractBriefFromConversation, inferPhase, conversationForLlm } from '@/lib/prompt';
+import { hasBrandContent, resolveBrandSpec } from '@/lib/brand-spec';
 import { processArtifactImages } from '@/lib/image-pipeline';
 import { extractPlaceholders } from '@/lib/image-placeholders';
 import { shouldRunImagePipeline, shouldPromptForImagePermission } from '@/lib/image-request';
 import { enrichProductDeckHtml } from '@/lib/product-deck-content';
 import { repairArtifactIfNeeded } from '@/lib/artifact-repair';
-import { applySession, getSkillSession, patchSkillSession } from '@/lib/skill-sessions';
+import { generationBudgetForSkill, FAST_PATH_SKILL_IDS } from '@shared/generation-budgets';
+import { applySession, findSkillForConversation, getSkillSession, patchSkillSession, previewHtmlForSkill } from '@/lib/skill-sessions';
+import { buildPreviewGenerationProgress } from '@/lib/preview-generation-progress';
 import { ConfirmDialog } from '@/components/chrome/ConfirmDialog';
 import {
   shouldAutoContinue,
@@ -20,7 +23,6 @@ import {
   type AutoContinueState,
 } from '@/lib/auto-continue';
 import type { ChatStreamEvent } from '@/types/global';
-import { findSkillForConversation, previewHtmlForSkill } from '@/lib/skill-sessions';
 
 export function Studio() {
   const project = useStudio((s) => s.project);
@@ -42,8 +44,11 @@ export function Studio() {
   const pendingAssistant = useStudio((s) => s.pendingAssistant);
 
   const conversationIdRef = useRef<string | null>(null);
+  const streamStartedAtRef = useRef(Date.now());
   const bindConversation = useStudio((s) => s.bindConversation);
   const [autoContinue, setAutoContinue] = useState<AutoContinueState>(createInitialAutoState);
+  const autoContinueRef = useRef(autoContinue);
+  autoContinueRef.current = autoContinue;
   // Track the buffer snapshot before a continuation so we can detect overlap
   const bufferBeforeContinueRef = useRef<string>('');
   // Image generation progress state
@@ -59,7 +64,15 @@ export function Studio() {
     const off = window.renoir.onChatEvent((e: ChatStreamEvent) => {
       const st = useStudio.getState();
       const skillId = findSkillForConversation(st.project, e.conversationId)
-        ?? (st.activeConversationId === e.conversationId ? st.streamingSkillId : undefined);
+        ?? (st.activeConversationId === e.conversationId ? (st.streamingSkillId ?? st.selectedSkillId) : undefined)
+        ?? (conversationIdRef.current === e.conversationId
+          ? (st.streamingSkillId ?? st.selectedSkillId)
+          : undefined)
+        ?? (st.streamingSkillId
+          && st.project
+          && getSkillSession(st.project, st.streamingSkillId).conversationId === e.conversationId
+          ? st.streamingSkillId
+          : undefined);
       if (!skillId) return;
 
       const viewing = st.selectedSkillId === skillId;
@@ -81,9 +94,10 @@ export function Studio() {
         const currentPending = viewing
           ? st.pendingAssistant
           : (st.project ? (st.project.skillSessions?.[skillId]?.pendingAssistant ?? '') : '');
-        const currentState = autoContinue;
+        const currentState = autoContinueRef.current;
+        const willAutoContinue = shouldAutoContinue(e.finishReason, currentPending, currentState);
 
-        if (shouldAutoContinue(e.finishReason, currentPending, currentState)) {
+        if (willAutoContinue) {
           const nextState: AutoContinueState = {
             ...currentState,
             attempts: currentState.attempts + 1,
@@ -94,7 +108,7 @@ export function Studio() {
           if (viewing) {
             void sendUserMessage(
               DEFAULT_AUTO_CONTINUE_CONFIG.continuePrompt,
-              { skipAppend: false },
+              { skipAppend: false, isAutoContinue: true },
             );
           }
         } else {
@@ -122,7 +136,7 @@ export function Studio() {
               if (proposal) setImageGenPrompt(proposal);
             }
 
-            void maybePersistLintFixes(art.html, after.project.id, skillId);
+            void maybePersistLintFixes(art.html, after.project.id, skillId, { skip: FAST_PATH_SKILL_IDS.has(skillId) });
           });
         }
       } else if (e.type === 'stalled') {
@@ -136,7 +150,7 @@ export function Studio() {
       }
     });
     return off;
-  }, [appendDelta, finishStream, toast, autoContinue]);
+  }, [appendDelta, finishStream, toast]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -203,7 +217,7 @@ export function Studio() {
     }
   };
 
-  const sendUserMessage = async (content: string, opts?: { skipAppend?: boolean; attachments?: any[] }) => {
+  const sendUserMessage = async (content: string, opts?: { skipAppend?: boolean; attachments?: any[]; isAutoContinue?: boolean }) => {
     if (!project || (!content.trim() && !opts?.attachments?.length)) return;
     const id = project.id + ':' + Date.now();
     conversationIdRef.current = id;
@@ -211,8 +225,10 @@ export function Studio() {
 
     // Reset auto-continue state for a fresh user-initiated message
     // (but not when auto-continue itself is sending the continuation prompt)
-    if (!autoContinue.isAutoContinuing) {
-      setAutoContinue(createInitialAutoState());
+    const budget = generationBudgetForSkill(skill?.id);
+    const isContinuation = Boolean(opts?.isAutoContinue || autoContinue.isAutoContinuing);
+    if (!isContinuation) {
+      setAutoContinue(createInitialAutoState(budget.maxAutoContinue));
       bufferBeforeContinueRef.current = '';
     }
 
@@ -220,7 +236,31 @@ export function Studio() {
     const next = useStudio.getState().project;
     if (!next) return;
 
-    const briefAnswers = extractBriefFromConversation(next.conversation);
+    let working = useStudio.getState().project;
+    if (!working) return;
+
+    // Drop any cached template preview so the pane waits for the LLM artifact.
+    if (!isContinuation && skill?.id) {
+      const cleared = patchSkillSession(working, skill.id, { previewHtml: undefined });
+      useStudio.getState().setProject(cleared);
+      working = useStudio.getState().project ?? cleared;
+    }
+
+    streamStartedAtRef.current = Date.now();
+    startStreaming();
+
+    const briefAnswers = extractBriefFromConversation(working.conversation);
+
+    let brand = working.brandSpec;
+    if (!hasBrandContent(brand) && (!skill?.id || !FAST_PATH_SKILL_IDS.has(skill.id))) {
+      brand = await resolveBrandSpec(next);
+    }
+    if (brand && brand !== working.brandSpec) {
+      const withBrand = { ...working, brandSpec: brand };
+      useStudio.getState().setProject(withBrand);
+      void window.renoir.saveProject(withBrand);
+      working = withBrand;
+    }
     const composed = composeSystemPrompt({
       skill,
       primer: skill ? (await window.renoir.getSkillPrimer(skill.id)) ?? undefined : undefined,
@@ -228,13 +268,12 @@ export function Studio() {
       designTokens: designSystem?.tokens,
       direction,
       answers: { ...briefAnswers, ...answers },
+      brand,
     });
 
-    startStreaming();
-
     if (selectedAgentId && selectedAgentId !== 'byok') {
-      // Route through CLI agent — single-shot prompt with the system context inline.
-      const flat = [composed.system, ...next.conversation.map((m) => `${m.role.toUpperCase()}: ${m.content}`)].join('\n\n');
+      const llmConversation = conversationForLlm(working.conversation, { keepLastArtifact: isContinuation });
+      const flat = [composed.system, ...llmConversation.map((m) => `${m.role.toUpperCase()}: ${m.content}`)].join('\n\n');
       const res = await window.renoir.invokeAgent({ agentId: selectedAgentId, conversationId: id, prompt: flat });
       if (!res.ok) {
         toast(res.error || 'Could not invoke agent', 'err');
@@ -243,15 +282,22 @@ export function Studio() {
       return;
     }
 
+    const llmConversation = conversationForLlm(working.conversation, {
+      keepLastArtifact: isContinuation,
+    });
     const messages: { role: 'system' | 'user' | 'assistant'; content: string; attachments?: any[] }[] = [
       { role: 'system', content: composed.system },
-      ...next.conversation.map((m) => ({
-        role: m.role as any,
+      ...llmConversation.map((m) => ({
+        role: m.role as 'system' | 'user' | 'assistant',
         content: m.content,
-        attachments: m.attachments,
+        attachments: m.attachments as any[] | undefined,
       })),
     ];
-    const res = await window.renoir.chatStart({ conversationId: id, messages });
+    const res = await window.renoir.chatStart({
+      conversationId: id,
+      messages,
+      maxTokens: budget.maxTokens,
+    });
     if (!res.ok) {
       toast(res.error || 'Could not start chat', 'err');
       void finishStream();
@@ -259,12 +305,15 @@ export function Studio() {
   };
 
   const cancel = async () => {
-    if (!conversationIdRef.current) return;
-    if (selectedAgentId && selectedAgentId !== 'byok') {
-      await window.renoir.cancelAgent(conversationIdRef.current);
-    } else {
-      await window.renoir.chatCancel(conversationIdRef.current);
+    setAutoContinue((s) => ({ ...s, isAutoContinuing: false, enabled: false }));
+    if (conversationIdRef.current) {
+      if (selectedAgentId && selectedAgentId !== 'byok') {
+        await window.renoir.cancelAgent(conversationIdRef.current);
+      } else {
+        await window.renoir.chatCancel(conversationIdRef.current);
+      }
     }
+    void finishStream();
   };
 
   const regenerateFrom = async (fromIndex: number) => {
@@ -281,56 +330,92 @@ export function Studio() {
 
   const lastAssistant = project?.conversation.findLast((m) => m.role === 'assistant');
   const liveExtracted = isStreaming ? extractArtifact(pendingAssistant) : null;
-  // If the user restored a historical version, render it instead of the latest.
   const activeVersion = project?.activeVersionId
     ? project.versions?.find((v) => v.id === project.activeVersionId)
     : null;
-  // Persist the preview between turns: while streaming a new turn that
-  // has not produced an <artifact> yet, fall back to the last completed one.
-  const fallbackExtracted = (() => {
-    if (activeVersion) {
-      return { html: activeVersion.html, complete: true };
-    }
+
+  // Only render complete artifacts — partial HTML in a scaled iframe looks squashed/broken.
+  const lastUserIdx = project?.conversation.findLastIndex((m) => m.role === 'user') ?? -1;
+  const lastAssistantIdx = project?.conversation.findLastIndex((m) => m.role === 'assistant') ?? -1;
+  const awaitingNewArtifact = Boolean(project && lastUserIdx > lastAssistantIdx);
+
+  const completeArtifactHtml = useMemo(() => {
+    if (liveExtracted?.complete) return liveExtracted.html;
+
+    const assistantComplete = !isStreaming && lastAssistant && !awaitingNewArtifact
+      ? extractArtifact(lastAssistant.content)
+      : null;
+    if (assistantComplete?.complete) return assistantComplete.html;
+
+    if (activeVersion?.html && !awaitingNewArtifact) return activeVersion.html;
+
+    // While waiting for a new LLM artifact, never resurface a cached template.
+    if (awaitingNewArtifact) return null;
+
     const cachedHtml = previewHtmlForSkill(project!, selectedSkillId);
-    if (cachedHtml) {
-      return { html: cachedHtml, complete: true };
-    }
-    if (lastAssistant) {
-      return extractArtifact(lastAssistant.content);
-    }
+    if (cachedHtml) return cachedHtml;
     return null;
-  })();
-  const extracted = liveExtracted || fallbackExtracted;
-  const artifactHtml = extracted?.html || null;
+  }, [activeVersion, liveExtracted, isStreaming, lastAssistant, project, selectedSkillId, awaitingNewArtifact]);
+
+  const previewArtifact = completeArtifactHtml;
+  const artifactHtml = previewArtifact;
   const artifactResetKey = activeVersion?.id
     ? `version-${activeVersion.id}`
     : (project?.conversation.findLast((m) => m.role === 'user')?.ts
       ?? String(project?.conversation.length ?? 0));
   const liveText = isStreaming ? pendingAssistant : (lastAssistant?.content || '');
   const briefLocked = hasLockedBrief(project?.conversation ?? []);
-  const questionForm = !briefLocked && !liveExtracted && !fallbackExtracted
+  const hasCompletePreview = Boolean(completeArtifactHtml);
+  const questionForm = !briefLocked && !liveExtracted?.complete && !hasCompletePreview
     ? extractQuestionForm(liveText)
     : null;
 
-  // If the last finished assistant message has an *unclosed* artifact, we
-  // suspect a truncation. Surface a Continue affordance so the user can
-  // resume without retyping context.
-  const truncated = !isStreaming && lastAssistant && extracted && !extracted.complete;
+  const generationPhase = inferPhase(
+    isStreaming ? pendingAssistant : (lastAssistant?.content || ''),
+    Date.now() - streamStartedAtRef.current,
+  );
+
+  const lastFinishedExtracted = lastAssistant ? extractArtifact(lastAssistant.content) : null;
+  const truncated = !isStreaming && lastFinishedExtracted && !lastFinishedExtracted.complete;
+  const autoContinueExhausted = !autoContinue.isAutoContinuing
+    && autoContinue.attempts >= autoContinue.maxAttempts
+    && truncated;
+  const isGenerating = isStreaming || autoContinue.isAutoContinuing || (truncated && !autoContinueExhausted);
+  const showPreviewLoading = Boolean(isGenerating && !previewArtifact);
+  const generationProgress = useMemo(
+    () => (isGenerating || imageGenProgress)
+      ? buildPreviewGenerationProgress({
+        phase: generationPhase,
+        isStreaming,
+        isAutoContinuing: autoContinue.isAutoContinuing,
+        hasOpenArtifact: Boolean(liveExtracted) || Boolean(previewArtifact),
+        artifactComplete: Boolean(
+          liveExtracted?.complete
+          || (!isStreaming && previewArtifact && !truncated),
+        ),
+        previewReady: Boolean(previewArtifact) && !imageGenProgress,
+        imageGen: imageGenProgress,
+      })
+      : null,
+    [
+      isGenerating,
+      generationPhase,
+      isStreaming,
+      autoContinue.isAutoContinuing,
+      liveExtracted,
+      previewArtifact,
+      truncated,
+      imageGenProgress,
+    ],
+  );
+
   const continueLast = async () => {
     if (!project) return;
     void sendUserMessage('Continue from where you stopped. Finish the artifact in full.', { skipAppend: false });
   };
 
   // Cancel auto-continuation: stop the stream and revert to manual mode
-  const cancelAutoContinue = async () => {
-    setAutoContinue((s) => ({ ...s, isAutoContinuing: false, enabled: false }));
-    await cancel();
-  };
-
-  // Whether auto-continue exhausted its attempts without completing
-  const autoContinueExhausted = !autoContinue.isAutoContinuing
-    && autoContinue.attempts >= autoContinue.maxAttempts
-    && truncated;
+  const cancelAutoContinue = cancel;
 
   if (!project) return <EmptyState />;
 
@@ -387,7 +472,7 @@ export function Studio() {
       )}
       <StudioLayout
         chat={<ChatPane onSend={(content, attachments) => sendUserMessage(content, { attachments })} onCancel={cancel} onRegenerate={regenerateFrom} onReloadPreview={() => window.dispatchEvent(new CustomEvent('renoir:reload-preview'))} hasPreview={Boolean(artifactHtml)} questionForm={questionForm} autoContinue={autoContinue} onCancelAutoContinue={cancelAutoContinue} />}
-        preview={<PreviewPane key={selectedSkillId ?? 'default'} artifact={artifactHtml} streaming={isStreaming && !!liveExtracted && !liveExtracted.complete} imageGenProgress={imageGenProgress} artifactResetKey={artifactResetKey} />}
+        preview={<PreviewPane key={selectedSkillId ?? 'default'} artifact={artifactHtml} loading={showPreviewLoading} loadingPhase={generationPhase} loadingProgress={generationProgress} streaming={isStreaming && !!liveExtracted && !liveExtracted.complete} imageGenProgress={imageGenProgress} artifactResetKey={artifactResetKey} />}
       />
     </div>
   );
@@ -446,7 +531,13 @@ function prepareImagePermissionPrompt(
   return { html: prepared, projectId, skillId, slotCount };
 }
 
-async function maybePersistLintFixes(html: string, projectId: string, skillId?: string) {
+async function maybePersistLintFixes(
+  html: string,
+  projectId: string,
+  skillId?: string,
+  opts?: { skip?: boolean },
+) {
+  if (opts?.skip) return;
   try {
     const st = useStudio.getState();
     const title = st.project?.name?.trim() || 'Artifact';

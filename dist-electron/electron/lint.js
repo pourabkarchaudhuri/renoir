@@ -3,11 +3,34 @@
 // regex spot-checks. Renderer shows a quick scorecard.
 import { isDashboardArtifact, missingDashboardRegions, normalizeDashboardRegionIds, tagHeuristicDashboardRegions } from '../shared/dashboard-layout.js';
 import { lintDashboardCharts } from '../shared/dashboard-charts.js';
+import { lintMarketingSiteFlow } from '../shared/marketing-site-layout.js';
 const RULES = [
     (html) => /<!doctype/i.test(html) ? null
         : { level: 'error', rule: 'doctype', message: 'Missing <!doctype html> declaration' },
     (html) => /<html[\s>]/i.test(html) ? null
         : { level: 'error', rule: 'html-root', message: 'No <html> root element' },
+    (html) => /<html[^>]*\blang\s*=/i.test(html) ? null
+        : { level: 'warn', rule: 'html-lang', message: 'Missing lang attribute on <html>' },
+    (html) => {
+        const h1s = html.match(/<h1\b[^>]*>/gi) || [];
+        if (h1s.length <= 1)
+            return null;
+        return { level: 'warn', rule: 'multiple-h1', message: `Document has ${h1s.length} <h1> elements — prefer one per page` };
+    },
+    (html) => {
+        const matches = [...html.matchAll(/\btabindex\s*=\s*["']?(\d+)["']?/gi)];
+        const high = matches.filter((m) => parseInt(m[1], 10) > 0);
+        if (!high.length)
+            return null;
+        return { level: 'warn', rule: 'tabindex-positive', message: `${high.length} element(s) with tabindex > 0` };
+    },
+    (html) => {
+        const hasNav = /<nav[\s>]/i.test(html);
+        const hasSkip = /skip-link|skip-to-main|skip-to-content/i.test(html);
+        if (!hasNav || hasSkip)
+            return null;
+        return { level: 'info', rule: 'skip-link', message: 'Consider a skip-to-main link for keyboard users' };
+    },
     (html) => /<title>[^<]*\S[^<]*<\/title>/i.test(html) ? null
         : { level: 'warn', rule: 'title', message: 'No non-empty <title>' },
     (html) => /<meta[^>]+name=["']viewport["']/i.test(html) ? null
@@ -118,20 +141,58 @@ const RULES = [
             message: 'Dashboard widgets must not scroll — use overflow:hidden on cards/charts/tables; only main scrolls',
         };
     },
+    (html) => {
+        const flowIssue = lintMarketingSiteFlow(html);
+        if (!flowIssue)
+            return null;
+        return {
+            level: 'warn',
+            rule: flowIssue.rule,
+            message: flowIssue.message,
+        };
+    },
 ];
+const RULE_META = {
+    doctype: { category: 'structure' },
+    'html-root': { category: 'structure' },
+    'html-lang': { category: 'structure', fixable: true },
+    title: { category: 'structure', fixable: true },
+    viewport: { category: 'structure', fixable: true },
+    main: { category: 'structure', fixable: true },
+    heading: { category: 'structure', fixable: true },
+    'multiple-h1': { category: 'structure' },
+    'img-alt': { category: 'images', fixable: true },
+    'input-label': { category: 'forms', fixable: true },
+    noopener: { category: 'structure', fixable: true },
+    'button-empty': { category: 'forms', fixable: true },
+    contrast: { category: 'contrast' },
+    'link-text': { category: 'structure' },
+    'mixed-content': { category: 'structure', fixable: true },
+    'tabindex-positive': { category: 'keyboard' },
+    'skip-link': { category: 'keyboard' },
+    'dashboard-regions': { category: 'dashboard' },
+    'dashboard-vw': { category: 'dashboard', fixable: true },
+    'dashboard-nested-scroll': { category: 'dashboard', fixable: true },
+    'marketing-screens': { category: 'structure', fixable: true },
+    'marketing-flow-links': { category: 'structure', fixable: true },
+};
+function enrichFinding(f) {
+    const meta = RULE_META[f.rule];
+    return meta ? { ...f, ...meta } : f;
+}
 export function lintArtifact(html) {
     const findings = [];
     for (const rule of RULES) {
         try {
             const f = rule(html);
             if (f)
-                findings.push(f);
+                findings.push(enrichFinding(f));
         }
         catch { /* swallow rule error */ }
     }
     if (isDashboardArtifact(html)) {
         for (const f of lintDashboardCharts(html))
-            findings.push(f);
+            findings.push(enrichFinding(f));
     }
     const errors = findings.filter((f) => f.level === 'error').length;
     const warnings = findings.filter((f) => f.level === 'warn').length;

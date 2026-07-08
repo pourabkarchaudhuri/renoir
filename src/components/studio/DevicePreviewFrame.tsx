@@ -3,8 +3,6 @@ import {
   computePreviewScale,
   frameDimensions,
   measurePreviewContainer,
-  PREVIEW_SURFACES,
-  scrollFrameHeight,
   type PreviewSurface,
 } from '@/lib/preview-surfaces';
 import type { PreviewMode } from '@/lib/preview-modes';
@@ -54,18 +52,12 @@ export function DevicePreviewFrame({
   lockScroll = false,
   className,
 }: DevicePreviewFrameProps) {
-  const spec = PREVIEW_SURFACES[surface];
-  const { w: deviceW, h: viewportH } = frameDimensions(surface, mode);
+  const { w: deviceW, h: deviceH } = frameDimensions(surface, mode);
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const [scale, setScale] = useState<number | null>(null);
-  const [contentHeight, setContentHeight] = useState<number | null>(null);
-
-  const deviceH = mode === 'scroll' && !constrainToViewport
-    ? scrollFrameHeight(spec, contentHeight)
-    : viewportH;
 
   const measure = useCallback(() => {
     const el = containerRef.current;
@@ -87,6 +79,10 @@ export function DevicePreviewFrame({
   }, [measure]);
 
   useLayoutEffect(() => {
+    setScale(null);
+  }, [surface, mode, deviceW, deviceH]);
+
+  useLayoutEffect(() => {
     if (!visible) return;
     measure();
     const raf = window.requestAnimationFrame(measure);
@@ -95,25 +91,7 @@ export function DevicePreviewFrame({
       window.cancelAnimationFrame(raf);
       timers.forEach((t) => window.clearTimeout(t));
     };
-  }, [visible, measure, srcDoc, deviceH]);
-
-  useEffect(() => {
-    const onMsg = (e: MessageEvent) => {
-      if (constrainToViewport) return;
-      const win = iframeRef.current?.contentWindow;
-      if (!win || e.source !== win) return;
-      if (e.data?.type === 'renoir:size' && typeof e.data.height === 'number') {
-        setContentHeight(e.data.height);
-      }
-    };
-    window.addEventListener('message', onMsg);
-    return () => window.removeEventListener('message', onMsg);
-  }, [srcDoc, constrainToViewport]);
-
-  useEffect(() => {
-    setContentHeight(null);
-    setScale(null);
-  }, [srcDoc, surface, mode, constrainToViewport]);
+  }, [visible, measure, srcDoc, surface, mode]);
 
   const scheduleSync = useCallback((win: Window | null | undefined, renderCharts: boolean) => {
     if (!win) return () => {};
@@ -129,35 +107,27 @@ export function DevicePreviewFrame({
     return scheduleSync(iframeRef.current?.contentWindow ?? null, true);
   }, [visible, srcDoc, deviceW, mode, scheduleSync]);
 
-  const scaledW = scale != null ? Math.max(1, Math.ceil(deviceW * scale)) : 0;
-  const scaledH = scale != null ? Math.max(1, Math.ceil(deviceH * scale)) : 0;
-  const visualW = scale != null ? deviceW * scale : 0;
-  const visualH = scale != null ? deviceH * scale : 0;
+  const displayW = scale != null ? deviceW * scale : 0;
+  const displayH = scale != null ? deviceH * scale : 0;
 
   return (
     <div
       ref={containerRef}
       aria-hidden={!visible}
       className={cn(
-        'absolute inset-0 w-full h-full min-h-0 flex items-center justify-center overflow-hidden grain',
+        'absolute inset-0 w-full h-full min-h-0 flex justify-center overflow-hidden grain',
+        mode === 'scroll' ? 'items-start' : 'items-center',
         constrainToViewport ? 'p-8' : 'p-4',
         visible ? 'z-10 opacity-100' : 'z-0 opacity-0 pointer-events-none',
         className,
       )}
     >
       {scale != null && (
-      <div
-        className="rounded-2xl overflow-hidden shadow-plate ring-1 ring-border/60 shrink-0 bg-white flex items-center justify-center"
-        style={{
-          width: scaledW,
-          height: scaledH,
-        }}
-      >
         <div
-          className="relative overflow-hidden"
+          className="rounded-2xl overflow-hidden shadow-plate ring-1 ring-border/60 shrink-0 bg-white relative"
           style={{
-            width: Math.max(1, Math.round(visualW)),
-            height: Math.max(1, Math.round(visualH)),
+            width: displayW,
+            height: displayH,
           }}
         >
           <iframe
@@ -186,7 +156,6 @@ export function DevicePreviewFrame({
             }}
           />
         </div>
-      </div>
       )}
     </div>
   );

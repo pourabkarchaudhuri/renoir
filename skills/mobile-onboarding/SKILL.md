@@ -43,6 +43,7 @@ Produce a three-screen mobile onboarding flow on a single HTML page.
    - "Skip" or alt action top-right.
 4. Last phone is the sign-in / continue-with options screen.
 5. Strong typography, gentle gradients, accessible contrast.
+6. Tag each phone frame with `data-screen-id` (e.g. `welcome`, `value`, `signin`) and wire CTAs with `data-goto` to the next screen id.
 
 ## Output contract
 

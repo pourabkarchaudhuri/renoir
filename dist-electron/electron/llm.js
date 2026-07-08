@@ -109,13 +109,22 @@ function shouldRetry(err, status) {
     return false;
 }
 export async function startChat(req) {
-    const { conversationId, messages, temperature } = req;
+    const { conversationId, messages, temperature, maxTokens } = req;
+    // #region agent log
+    fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'B', location: 'electron/llm.ts:startChat:entry', message: 'startChat entered', data: { conversationId, messageCount: messages.length, roles: messages.map((m) => m.role), maxTokens: maxTokens ?? null }, timestamp: Date.now() }) }).catch(() => { });
+    // #endregion
     const resolved = await resolveRoute();
     if (!resolved.ok) {
+        // #region agent log
+        fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'B', location: 'electron/llm.ts:startChat:routeFail', message: 'resolveRoute failed', data: { conversationId, reason: resolved.reason }, timestamp: Date.now() }) }).catch(() => { });
+        // #endregion
         broadcast({ type: 'error', conversationId, message: resolved.reason });
         return { ok: false, error: resolved.reason };
     }
     const route = resolved.route;
+    // #region agent log
+    fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'B', location: 'electron/llm.ts:startChat:routeOk', message: 'route resolved', data: { conversationId, kind: route.kind, source: route.source, model: route.model }, timestamp: Date.now() }) }).catch(() => { });
+    // #endregion
     const ctrl = new AbortController();
     const call = {
         ctrl,
@@ -137,7 +146,10 @@ export async function startChat(req) {
         let attempts = 0;
         while (true) {
             try {
-                const ok = await runOnce({ conversationId, route, messages, temperature, ctrl, call });
+                const ok = await runOnce({ conversationId, route, messages, temperature, maxTokens, ctrl, call });
+                // #region agent log
+                fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'F', location: 'electron/llm.ts:startChat:runOnceDone', message: 'runOnce finished', data: { conversationId, ok, attempts }, timestamp: Date.now() }) }).catch(() => { });
+                // #endregion
                 if (ok)
                     break;
                 // runOnce returned false = transient error already handled with retry broadcast
@@ -148,6 +160,9 @@ export async function startChat(req) {
                 }
             }
             catch (err) {
+                // #region agent log
+                fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'F', location: 'electron/llm.ts:startChat:runOnceCatch', message: 'runOnce threw', data: { conversationId, name: err?.name ?? null, error: String(err?.message || err) }, timestamp: Date.now() }) }).catch(() => { });
+                // #endregion
                 if (err?.name === 'AbortError') {
                     broadcast({ type: 'done', conversationId, finishReason: 'aborted' });
                     break;
@@ -220,7 +235,8 @@ function temperatureUnsupported(status, bodyText) {
         && /not supported|unsupported/i.test(bodyText);
 }
 async function runOnce(args) {
-    const { conversationId, route, messages, temperature, ctrl, call } = args;
+    const { conversationId, route, messages, temperature, maxTokens, ctrl, call } = args;
+    const tokenCap = maxTokens ?? 16384;
     const headers = { 'Content-Type': 'application/json' };
     let bodyJson;
     // Pre-process messages: inline text attachments and collect image attachments
@@ -236,7 +252,7 @@ async function runOnce(args) {
         const rest = processedMessages.filter((m) => m.role !== 'system');
         bodyJson = withTemperature({
             model: route.model,
-            max_tokens: 16384,
+            max_tokens: tokenCap,
             stream: true,
             ...(sys ? { system: sys } : {}),
             messages: rest.map((m) => {
@@ -269,6 +285,7 @@ async function runOnce(args) {
         bodyJson = withTemperature({
             model: route.model,
             stream: true,
+            max_output_tokens: tokenCap,
             ...(sys ? { instructions: sys } : {}),
             input: rest.map((m) => {
                 const imgs = m.images;
@@ -296,6 +313,7 @@ async function runOnce(args) {
         headers.Authorization = `Bearer ${route.apiKey}`;
         bodyJson = withTemperature({
             model: route.model,
+            max_tokens: tokenCap,
             messages: processedMessages.map((m) => {
                 const imgs = m.images;
                 if (imgs.length > 0) {
@@ -322,6 +340,7 @@ async function runOnce(args) {
         headers.Authorization = `Bearer ${route.apiKey}`;
         bodyJson = withTemperature({
             model: route.model,
+            max_tokens: tokenCap,
             messages: processedMessages.map((m) => {
                 const imgs = m.images;
                 if (imgs.length > 0) {
@@ -343,12 +362,18 @@ async function runOnce(args) {
             stream: true,
         }, route.kind, temperature);
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'F', location: 'electron/llm.ts:runOnce:fetchStart', message: 'fetch starting', data: { conversationId, kind: route.kind, url: shortenUrl(route.url), bodyKeys: Object.keys(bodyJson), inputType: Array.isArray(bodyJson.input) ? typeof bodyJson.input?.[0]?.content : 'n/a' }, timestamp: Date.now() }) }).catch(() => { });
+    // #endregion
     let res = await fetch(route.url, {
         method: 'POST',
         headers,
         body: JSON.stringify(bodyJson),
         signal: ctrl.signal,
     });
+    // #region agent log
+    fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'F', location: 'electron/llm.ts:runOnce:fetchStatus', message: 'fetch returned', data: { conversationId, status: res.status, ok: res.ok, hasBody: Boolean(res.body), contentType: res.headers.get('content-type') }, timestamp: Date.now() }) }).catch(() => { });
+    // #endregion
     if (!res.ok && temperatureUnsupported(res.status, await res.clone().text().catch(() => ''))) {
         const { temperature: _drop, ...rest } = bodyJson;
         bodyJson = rest;
@@ -358,9 +383,15 @@ async function runOnce(args) {
             body: JSON.stringify(bodyJson),
             signal: ctrl.signal,
         });
+        // #region agent log
+        fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'F', location: 'electron/llm.ts:runOnce:tempRetry', message: 'retried without temperature', data: { conversationId, status: res.status, ok: res.ok }, timestamp: Date.now() }) }).catch(() => { });
+        // #endregion
     }
     if (!res.ok || !res.body) {
         const text = await res.text().catch(() => '');
+        // #region agent log
+        fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'G', location: 'electron/llm.ts:runOnce:httpError', message: 'LLM HTTP error', data: { conversationId, status: res.status, bodyPreview: text.slice(0, 300) }, timestamp: Date.now() }) }).catch(() => { });
+        // #endregion
         const transient = shouldRetry(null, res.status);
         if (transient && call.attempt < MAX_RETRIES) {
             call.attempt += 1;
@@ -380,6 +411,9 @@ async function runOnce(args) {
     const decoder = new TextDecoder();
     let buf = '';
     let finishReason;
+    let sseEventCount = 0;
+    const sseTypes = [];
+    let deltaCount = 0;
     while (true) {
         const { done, value } = await reader.read();
         if (done)
@@ -405,10 +439,15 @@ async function runOnce(args) {
             }
             try {
                 const json = JSON.parse(payload);
+                sseEventCount += 1;
+                const evType = typeof json.type === 'string' ? json.type : (json.choices ? 'chat.completion.chunk' : 'unknown');
+                if (sseTypes.length < 12)
+                    sseTypes.push(evType);
                 if (route.kind === 'anthropic') {
                     if (json.type === 'content_block_delta' && json.delta?.type === 'text_delta') {
                         broadcast({ type: 'delta', conversationId, text: json.delta.text });
                         call.lastDeltaAt = Date.now();
+                        deltaCount += 1;
                     }
                     else if (json.type === 'message_delta' && json.delta?.stop_reason) {
                         finishReason = json.delta.stop_reason;
@@ -419,10 +458,12 @@ async function runOnce(args) {
                     if (t === 'response.output_text.delta' && typeof json.delta === 'string') {
                         broadcast({ type: 'delta', conversationId, text: json.delta });
                         call.lastDeltaAt = Date.now();
+                        deltaCount += 1;
                     }
                     else if (t === 'response.content_part.delta' && json.delta?.text) {
                         broadcast({ type: 'delta', conversationId, text: json.delta.text });
                         call.lastDeltaAt = Date.now();
+                        deltaCount += 1;
                     }
                     else if (t === 'response.completed' || t === 'response.done') {
                         finishReason = json.response?.status ?? 'completed';
@@ -438,6 +479,7 @@ async function runOnce(args) {
                     if (typeof delta === 'string' && delta.length) {
                         broadcast({ type: 'delta', conversationId, text: delta });
                         call.lastDeltaAt = Date.now();
+                        deltaCount += 1;
                     }
                     if (fr)
                         finishReason = fr;
@@ -448,6 +490,9 @@ async function runOnce(args) {
             }
         }
     }
+    // #region agent log
+    fetch('http://127.0.0.1:7759/ingest/3b4cda36-8e55-42c4-9e6f-9131b4907d3c', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '85542e' }, body: JSON.stringify({ sessionId: '85542e', runId: 'pre-fix', hypothesisId: 'H', location: 'electron/llm.ts:runOnce:streamEnd', message: 'stream reader finished', data: { conversationId, sseEventCount, deltaCount, sseTypes, finishReason: finishReason ?? null }, timestamp: Date.now() }) }).catch(() => { });
+    // #endregion
     broadcast({ type: 'done', conversationId, finishReason });
     return true;
 }

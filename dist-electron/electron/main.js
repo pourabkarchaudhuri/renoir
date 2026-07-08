@@ -51,6 +51,7 @@ function adaptDiskPrimer(raw) {
 import { lintArtifact, extractBrandSpec } from './lint.js';
 import { generateAudio, generateVideo } from './media.js';
 import { renderHyperFrames } from './hyperframes.js';
+import { recordPreview } from './preview-record.js';
 import { listTemplates, saveTemplate, deleteTemplate } from './templates.js';
 import { exportProject, importProject } from './projectIO.js';
 import { startCritique } from './critique.js';
@@ -62,6 +63,8 @@ import { renderStoryboard } from './storyboard.js';
 import { extractPalette } from './colors.js';
 import { ensurePreviewWindow, pushPreviewHtml, isPreviewOpen } from './preview-window.js';
 import { exportArtifactToPptx } from './pptx.js';
+import { buildMarketingSiteFromBrief } from './marketing-site.js';
+import { buildBlogPostFromBrief } from './blog-post.js';
 import { listProjectAssets } from './assets.js';
 let mainWindow = null;
 let closeConfirmed = false;
@@ -222,6 +225,22 @@ function registerIpc() {
     ipcMain.handle('renoir:chat:start', (_e, req) => startChat(req));
     ipcMain.handle('renoir:chat:cancel', (_e, id) => cancelChat(id));
     ipcMain.handle('renoir:chat:route', () => describeRoute());
+    ipcMain.handle('renoir:marketing:instant', (_e, brief) => {
+        try {
+            return { ok: true, html: buildMarketingSiteFromBrief(brief) };
+        }
+        catch (err) {
+            return { ok: false, error: String(err?.message || err) };
+        }
+    });
+    ipcMain.handle('renoir:blog-post:instant', (_e, brief) => {
+        try {
+            return { ok: true, html: buildBlogPostFromBrief(brief) };
+        }
+        catch (err) {
+            return { ok: false, error: String(err?.message || err) };
+        }
+    });
     // Theme — sync titlebar overlay color in real time on Windows.
     ipcMain.handle('renoir:theme:set', (_e, theme) => {
         if (process.platform !== 'win32')
@@ -411,6 +430,7 @@ function registerIpc() {
     ipcMain.handle('renoir:video:generate', (_e, req) => generateVideo(req));
     // HyperFrames
     ipcMain.handle('renoir:hyperframes:render', (_e, req) => renderHyperFrames(req));
+    ipcMain.handle('renoir:preview:record', (_e, req) => recordPreview(req));
     // Lint + brand spec
     ipcMain.handle('renoir:lint:artifact', (_e, html) => lintArtifact(html || ''));
     ipcMain.handle('renoir:brand:extract', (_e, text) => extractBrandSpec(text || ''));

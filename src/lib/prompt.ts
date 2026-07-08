@@ -2,6 +2,9 @@
 
 import type { SkillSummary, DesignSystemSummary, VisualDirection, BrandSpec } from '@/types/global';
 import { dashboardLayoutPromptLines } from '@shared/dashboard-layout';
+import { blogPostPromptLines } from '@shared/blog-post-layout';
+import { marketingSitePromptLines } from '@shared/marketing-site-layout';
+import { FAST_PATH_SKILL_IDS } from '@shared/generation-budgets';
 import { productDeckPromptLines } from '@/lib/product-deck-content';
 
 export interface PromptComposition {
@@ -266,6 +269,17 @@ Background patterns:
 - Subtle topography: layered conic-gradients at very low opacity for organic feel.
 `;
 
+const FRAME_SLIM = `You are Renoir, a design-fluent assistant that produces real, working artifacts.
+
+Hard rules:
+1. Emit ONE self-contained HTML document inside <artifact>...</artifact>. Use a single inline <style> block with :root design-system tokens.
+2. Outside the artifact: at most one sentence of intent. No step-by-step narration.
+3. Honor active design-system tokens (--bg, --fg, --accent, --muted, --surface, --border).
+4. Never emit <question-form> — infer audience, tone, and scope from the brief and produce the artifact on turn 1.
+5. Specific copy only — no lorem ipsum. Semantic HTML, responsive ≤768px.
+
+Keep CSS compact. No animations unless essential.`;
+
 export function composeSystemPrompt(opts: {
   skill?: SkillSummary;
   primer?: string;
@@ -275,7 +289,8 @@ export function composeSystemPrompt(opts: {
   brand?: BrandSpec;
   answers?: Record<string, string>;
 }): PromptComposition {
-  const lines: string[] = [FRAME];
+  const useSlimFrame = Boolean(opts.skill?.id && FAST_PATH_SKILL_IDS.has(opts.skill.id));
+  const lines: string[] = [useSlimFrame ? FRAME_SLIM : FRAME];
 
   if (opts.skill) {
     lines.push('');
@@ -320,6 +335,20 @@ export function composeSystemPrompt(opts: {
   if (opts.skill?.id === 'product-deck') {
     lines.push('');
     lines.push(...productDeckPromptLines());
+  }
+
+  if (opts.skill?.id === 'saas-landing') {
+    lines.push('');
+    lines.push(...marketingSitePromptLines());
+    lines.push('');
+    lines.push('Skill override: emit the <artifact> immediately on turn 1 — never <question-form>. Prioritize a compact artifact under 280 lines.');
+  }
+
+  if (opts.skill?.id === 'blog-post') {
+    lines.push('');
+    lines.push(...blogPostPromptLines());
+    lines.push('');
+    lines.push('Skill override: emit the <artifact> immediately on turn 1 — never <question-form>.');
   }
 
   if (opts.brand) {
@@ -374,6 +403,23 @@ export function stripArtifact(text: string): string {
     .replace(/<question-form>[\s\S]*?<\/question-form>/gi, '')
     .replace(/<question-form>[\s\S]*$/i, '')
     .trim();
+}
+
+/** Trim prior assistant HTML from LLM context — keeps the latest partial artifact when continuing. */
+export function conversationForLlm(
+  messages: { role: string; content: string; attachments?: unknown[] }[],
+  opts?: { keepLastArtifact?: boolean },
+): { role: string; content: string; attachments?: unknown[] }[] {
+  const lastAssistantIdx = messages.findLastIndex((m) => m.role === 'assistant');
+  return messages.map((m, i) => {
+    if (m.role !== 'assistant') return m;
+    if (opts?.keepLastArtifact && i === lastAssistantIdx) return m;
+    const stripped = stripArtifact(m.content).trim();
+    return {
+      ...m,
+      content: stripped || '(prior artifact omitted from context)',
+    };
+  });
 }
 
 /** Infer a contextual streaming phase from the buffer so the chat can

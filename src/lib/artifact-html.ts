@@ -1,6 +1,7 @@
 import { ensureViewportMeta } from '@/lib/preview-surfaces';
 import { buildThemeCss, injectThemeStyle, type ThemeStyleOptions } from '@/lib/theme-tokens';
 import { injectDashboardShell } from '@shared/dashboard-layout';
+import { ensureMarketingSiteScreens, isMarketingSiteArtifact } from '@shared/marketing-site-layout';
 import { enrichProductDeckHtml } from '@/lib/product-deck-content';
 import { fixArtifactLintFindings } from '@/lib/artifact-lint-fix';
 
@@ -89,6 +90,10 @@ export function normalizeArtifactDocument(
       productName: opts.productName ?? title,
       finalize: opts.productDeckFinalize ?? true,
     }).html;
+  }
+
+  if (isMarketingSiteArtifact(out) || (/\bdata-screen-id\s*=\s*["']landing["']/i.test(out) && /\bdata-goto\s*=/i.test(out))) {
+    out = ensureMarketingSiteScreens(out);
   }
 
   out = fixArtifactLintFindings(out, {

@@ -16,12 +16,13 @@ const skills = [
     },
     {
         id: 'saas-landing', name: 'SaaS Landing', category: 'web', emoji: '🚀',
-        blurb: 'Conversion-tuned landing with social proof + pricing.',
-        primer: 'Hero with primary CTA above the fold (use split-hero or centered-hero pattern), social-proof row (logo strip or metric counters with staggered entrance animation), three-column feature grid (icon + heading + 2-line description, hover: elevation-2 + translateY(-2px)), pricing table (3 tiers, center highlighted at scale 1.02, monthly/annual toggle), testimonial block (featured pull-quote with realistic names and roles), FAQ accordion, footer. Add 2–3 gradient orbs behind the hero. Use dark/light theme tokens.',
+        blurb: 'Multi-screen SaaS site — landing, changelog, and blog linked for walk-through.',
+        primer: 'Instant 3-screen shell (landing/changelog/blog) via template; LLM copy pass only. data-goto nav. Never ask questions — emit artifact on turn 1. Use design-system theme tokens.',
         questions: [
             { id: 'product', label: 'Product name + 1-line pitch', type: 'text' },
             { id: 'audience', label: 'Target customer', type: 'text' },
             { id: 'tiers', label: 'Pricing tiers', type: 'textarea', placeholder: 'Starter $19 / Pro $49 / Team $99' },
+            { id: 'article_topic', label: 'Blog article topic (optional)', type: 'text', placeholder: 'e.g. Why we rewrote our sync engine' },
             { id: 'tone', label: 'Tone', type: 'select', options: ['confident', 'friendly', 'technical', 'playful'] },
         ],
     },
@@ -60,7 +61,7 @@ const skills = [
     {
         id: 'changelog', name: 'Changelog', category: 'web', emoji: '🗒️',
         blurb: 'Versioned release notes.',
-        primer: 'Reverse-chronological entries, semver tags, type chips (feat/fix/perf), inline screenshots as colored blocks. Use entrance animation on each entry reveal. Elevation-1 on entry cards. Dark/light theme tokens. Realistic version numbers and dates — "v2.4.0 · March 2024", specific feature descriptions.',
+        primer: 'Single-screen changelog only. Reverse-chronological entries, semver tags, type chips (feat/fix/perf/breaking), inline screenshots as colored blocks. Elevation-1 on entry cards. Dark/light theme tokens. Realistic version numbers and dates. For a full linked marketing site (landing + changelog + blog), use the SaaS Landing skill instead.',
         questions: [
             { id: 'product', label: 'Product', type: 'text' },
             { id: 'tone', label: 'Tone', type: 'select', options: ['terse', 'editorial', 'enthusiastic'] },
@@ -69,7 +70,7 @@ const skills = [
     {
         id: 'blog-post', name: 'Blog Post', category: 'doc', emoji: '✍️',
         blurb: 'Long-form editorial article.',
-        primer: 'Title, deck, hero block, drop cap, pull-quotes, sidenotes, footer-bio. Read-time + share row. Clear typography hierarchy — display heading, body at 18px/1.7, caption for metadata. Dark/light theme tokens. Entrance animation on scroll for pull-quotes. Realistic content — benefit-driven headline, specific author name and role, plausible publication date.',
+        primer: 'Single-screen blog article only. Masthead, article header (eyebrow, headline, deck, byline + read time), hero figure, body (~350 words, 4–6 H2, drop cap, pull quote), author footer, 3 related cards. Tag regions with data-od-id. Dark/light theme tokens. For a full linked marketing site, use the SaaS Landing skill instead.',
         questions: [
             { id: 'topic', label: 'Topic', type: 'text' },
             { id: 'angle', label: 'Angle', type: 'text' },

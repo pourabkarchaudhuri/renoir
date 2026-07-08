@@ -89,7 +89,7 @@ export function savePreviewSurface(surface: PreviewSurface): void {
 
 
 
-/** Device pixel frame for a surface + preview mode. */
+/** Device pixel frame for a surface + preview mode (preview chrome always uses this). */
 
 export function frameDimensions(
 
@@ -108,6 +108,44 @@ export function frameDimensions(
   }
 
   return { w: spec.w, h: spec.h };
+
+}
+
+
+
+/** Scaled on-screen size that preserves the device frame aspect ratio. */
+
+export function scaledPreviewSize(
+
+  containerW: number,
+
+  containerH: number,
+
+  surface: PreviewSurface,
+
+  mode: 'scroll' | 'present',
+
+  padding = 0,
+
+): { deviceW: number; deviceH: number; scale: number; displayW: number; displayH: number } {
+
+  const { w: deviceW, h: deviceH } = frameDimensions(surface, mode);
+
+  const scale = computePreviewScale(containerW, containerH, deviceW, deviceH, padding);
+
+  return {
+
+    deviceW,
+
+    deviceH,
+
+    scale,
+
+    displayW: deviceW * scale,
+
+    displayH: deviceH * scale,
+
+  };
 
 }
 

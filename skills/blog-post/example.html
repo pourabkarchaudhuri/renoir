@@ -8,73 +8,136 @@
     :root {
       --bg: #fafaf9; --fg: #1c1b1a; --muted: #6b6964; --border: #e6e4e0;
       --accent: #c96442; --surface: #ffffff;
+      --chip-feat: color-mix(in oklch, var(--accent) 18%, var(--surface));
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--fg); font: 18px/1.65 Georgia, 'Iowan Old Style', serif; }
-    .wrap { max-width: 680px; margin: 0 auto; padding: 56px 28px 96px; }
-    nav.top { font-family: -apple-system, system-ui, sans-serif; font-size: 13px; color: var(--muted); margin-bottom: 56px; }
-    nav.top a { color: inherit; text-decoration: none; }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 0 28px 96px; }
+    .site-nav {
+      font-family: -apple-system, system-ui, sans-serif;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 20px 0; margin-bottom: 48px; border-bottom: 1px solid var(--border);
+    }
+    .logo { font-weight: 600; font-size: 17px; color: var(--fg); text-decoration: none; }
+    .site-nav nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .site-nav a { color: var(--fg); text-decoration: none; font-size: 14px; padding: 8px 12px; }
+    .site-nav a:hover { color: var(--accent); }
     .eyebrow { font-family: -apple-system, system-ui, sans-serif; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 14px; }
     h1 { font-size: clamp(36px, 5vw, 52px); line-height: 1.1; letter-spacing: -0.015em; margin: 0 0 20px; }
     .byline { font-family: -apple-system, system-ui, sans-serif; font-size: 14px; color: var(--muted); margin: 0 0 40px; display: flex; align-items: center; gap: 12px; }
     .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); opacity: 0.18; }
-    .lede { font-size: 22px; line-height: 1.5; color: var(--fg); margin: 0 0 40px; font-style: italic; }
-    .hero-figure { aspect-ratio: 16/9; background: linear-gradient(135deg, var(--accent), #6b6964); border-radius: 8px; margin-bottom: 48px; opacity: 0.85; }
+    .lede { font-size: 22px; line-height: 1.5; margin: 0 0 40px; font-style: italic; }
+    .hero-figure { aspect-ratio: 16/9; background: linear-gradient(135deg, var(--accent), var(--muted)); border-radius: 8px; margin-bottom: 12px; opacity: 0.85; }
+    .fig-cap { font-family: -apple-system, system-ui, sans-serif; font-size: 13px; color: var(--muted); margin-bottom: 48px; }
     p { margin: 24px 0; }
-    p:first-of-type::first-letter { float: left; font-size: 64px; line-height: 0.9; padding: 6px 10px 0 0; font-weight: 600; color: var(--accent); }
+    p.body-first::first-letter { float: left; font-size: 64px; line-height: 0.9; padding: 6px 10px 0 0; font-weight: 600; color: var(--accent); }
     h2 { font-size: 28px; letter-spacing: -0.01em; margin: 56px 0 12px; line-height: 1.2; }
-    blockquote { margin: 40px 0; padding: 0 32px; font-size: 24px; line-height: 1.4; color: var(--fg); border-left: 3px solid var(--accent); font-style: italic; }
+    .pull { font-size: 24px; line-height: 1.4; border-left: 3px solid var(--accent); padding-left: 32px; margin: 40px 0; font-style: italic; }
+    blockquote { margin: 40px 0; padding: 0 32px; color: var(--muted); font-style: italic; }
     code { font-family: ui-monospace, monospace; background: var(--surface); border: 1px solid var(--border); padding: 1px 5px; border-radius: 4px; font-size: 0.85em; }
-    pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 18px; overflow-x: auto; font: 14px/1.55 ui-monospace, monospace; }
-    figure.numbers { font-family: -apple-system, system-ui, sans-serif; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin: 40px -24px; padding: 28px 24px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-    figure.numbers .stat .value { font-family: Georgia, serif; font-size: 38px; letter-spacing: -0.01em; line-height: 1; }
-    figure.numbers .stat .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 6px; }
-    .endnote { font-family: -apple-system, system-ui, sans-serif; font-size: 13px; color: var(--muted); margin-top: 64px; padding-top: 24px; border-top: 1px solid var(--border); }
-    .endnote a { color: var(--accent); text-decoration: none; }
+    ul { margin: 24px 0; padding-left: 24px; }
+    .author-box { font-family: -apple-system, system-ui, sans-serif; display: flex; gap: 16px; margin-top: 64px; padding-top: 32px; border-top: 1px solid var(--border); font-size: 15px; }
+    .author-box .avatar-lg { width: 48px; height: 48px; border-radius: 50%; background: var(--chip-feat); display: grid; place-items: center; font-weight: 600; color: var(--accent); flex-shrink: 0; }
+    .related { font-family: -apple-system, system-ui, sans-serif; margin-top: 64px; }
+    .related h3 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 20px; }
+    .related-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .related-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+    .related-card .thumb { height: 80px; background: linear-gradient(120deg, var(--border), var(--chip-feat)); }
+    .related-card h4 { font-size: 15px; margin: 12px 14px 4px; color: var(--fg); }
+    .related-card p { font-size: 13px; color: var(--muted); margin: 0 14px 8px; }
+    .related-card .date { font-size: 11px; color: var(--muted); margin: 0 14px 14px; font-family: ui-monospace, monospace; }
+    @media (max-width: 768px) { .related-grid { grid-template-columns: 1fr; } .site-nav nav { display: none; } }
   </style>
 </head>
 <body>
   <article class="wrap" data-od-id="article">
-    <nav class="top"><a href="#">← Filebase blog</a></nav>
-    <div class="eyebrow">Engineering</div>
-    <h1>Why we rewrote our sync engine in Rust</h1>
-    <div class="byline">
-      <div class="avatar"></div>
-      <span>By Mira Hassan · April 22, 2026 · 8 min read</span>
-    </div>
-    <p class="lede">For two years our Go sync engine was good enough. Then video editors started joining the customer list, and the GC pauses we'd been politely ignoring turned into bug reports we couldn't ignore.</p>
-    <div class="hero-figure" data-od-id="hero-figure"></div>
+    <header class="site-nav" data-od-id="masthead">
+      <a class="logo" href="#">◰ Filebase</a>
+      <nav>
+        <a href="#">Product</a>
+        <a href="#">Changelog</a>
+        <a href="#">Blog</a>
+        <a href="#">Docs</a>
+        <a href="#">Pricing</a>
+      </nav>
+    </header>
 
-    <p>The decision wasn't sudden. We'd been watching the GC pause distribution shift for six months before we admitted what the data was telling us. P50 latency was great. P99 was a horror movie. Customers syncing 30 GB of <code>.psd</code> files in active editing sessions were the ones writing in.</p>
+    <header data-od-id="article-header">
+      <div class="eyebrow">Engineering</div>
+      <h1>Why we rewrote our sync engine in Rust</h1>
+      <div class="byline">
+        <div class="avatar" aria-hidden="true"></div>
+        <span>By Mira Hassan · April 22, 2026 · 8 min read</span>
+      </div>
+      <p class="lede">For two years our Go sync engine was good enough. Then video editors started joining the customer list, and the GC pauses we'd been politely ignoring turned into bug reports we couldn't ignore.</p>
+    </header>
 
-    <p>Rewriting an entire sync engine sounds like the kind of project a startup is told never to do. We did it anyway. Here's how it went, what surprised us, and the parts I'd do differently.</p>
-
-    <h2>The trigger: GC pauses we couldn't fix</h2>
-    <p>Go's garbage collector is brilliant. It is also, fundamentally, a tradeoff. Our hot path allocated short-lived buffer slices on every block diff — and at our scale, on a heavy uploader, the collector ran often enough that the P99 pause crept past 50ms.</p>
-
-    <p>We tried the usual fixes: pooling buffers with <code>sync.Pool</code>, tuning <code>GOGC</code>, reducing allocations in the merge path. They each helped a little. None of them got us under 20ms, and the customers we cared about needed under 5.</p>
-
-    <blockquote>"We can't fix this in Go. We can fix it in something without a GC."</blockquote>
-
-    <p>Our staff engineer Sasha said this in a meeting in October. He was right. The question wasn't whether to leave Go. It was what to leave it for, and how much we could keep.</p>
-
-    <h2>What we kept; what we threw out</h2>
-    <p>The CLI stayed in Go. The control plane stayed in Go. The bit that does block-level diffing in a hot loop on a customer's laptop — that became Rust. The boundary became a single FFI surface with a small, opinionated protocol.</p>
-
-    <figure class="numbers">
-      <div class="stat"><div class="value">38ms → 4ms</div><div class="label">P99 sync latency</div></div>
-      <div class="stat"><div class="value">62%</div><div class="label">Memory drop</div></div>
-      <div class="stat"><div class="value">11 weeks</div><div class="label">From RFC to ship</div></div>
+    <figure data-od-id="hero-figure">
+      <div class="hero-figure"></div>
+      <figcaption class="fig-cap">Block-level diff visualization — only changed chunks cross the wire.</figcaption>
     </figure>
 
-    <p>The numbers above are real and from production. They are also misleading without context: the Rust port doesn't just remove the GC, it also removes a layer of abstraction we'd been carrying since the Go MVP.</p>
+    <div data-od-id="article-body">
+      <p class="body-first">The decision wasn't sudden. We'd been watching the GC pause distribution shift for six months before we admitted what the data was telling us. P50 latency was great. P99 was a horror movie.</p>
 
-    <h2>What I'd do differently</h2>
-    <p>One thing: the FFI boundary. We chose <code>cgo</code> for symmetry — Go calling Rust feels right when you already have Go everywhere. But the binding ceremony is brittle, and we ate two production incidents from string lifetime mistakes before we wrote a wrapper layer that handled them once.</p>
+      <p>Rewriting an entire sync engine sounds like the kind of project a startup is told never to do. We did it anyway. Here's how it went, what surprised us, and the parts I'd do differently.</p>
 
-    <p>If I were starting today, I'd reach for <code>uniffi</code> or generate the bindings from a schema. The lessons isn't <em>don't use cgo</em>; it's <em>treat the boundary like an external API the moment you cross language families</em>.</p>
+      <h2>The trigger: GC pauses we couldn't fix</h2>
+      <p>Go's garbage collector is brilliant. It is also, fundamentally, a tradeoff. Our hot path allocated short-lived buffer slices on every block diff — and at our scale, on a heavy uploader, the collector ran often enough that the P99 pause crept past 50ms.</p>
 
-    <div class="endnote">Filebase is hiring engineers who like writing this kind of post. <a href="#">See open roles →</a></div>
+      <p>We tried the usual fixes: pooling buffers with <code>sync.Pool</code>, tuning <code>GOGC</code>, reducing allocations in the merge path. They each helped a little. None of them got us under 20ms.</p>
+
+      <p class="pull">"We can't fix this in Go. We can fix it in something without a GC."</p>
+
+      <h2>What we kept; what we threw out</h2>
+      <p>The CLI stayed in Go. The control plane stayed in Go. The bit that does block-level diffing in a hot loop on a customer's laptop — that became Rust.</p>
+
+      <blockquote>Every cross-language boundary is an external API the day you ship it.</blockquote>
+
+      <h2>Results</h2>
+      <ul>
+        <li>P99 sync latency: 38ms → 4ms</li>
+        <li>Memory on heavy uploaders: down 62%</li>
+        <li>RFC to production: 11 weeks</li>
+      </ul>
+
+      <h2>What I'd do differently</h2>
+      <p>One thing: the FFI boundary. We chose <code>cgo</code> for symmetry — Go calling Rust feels right when you already have Go everywhere. But the binding ceremony is brittle.</p>
+
+      <p>If I were starting today, I'd reach for <code>uniffi</code> or generate the bindings from a schema.</p>
+    </div>
+
+    <footer class="author-box" data-od-id="author-footer">
+      <div class="avatar-lg">MH</div>
+      <div>
+        <strong>Mira Hassan</strong> · Staff Engineer<br>
+        <span style="color:var(--muted)">Builds sync infrastructure at Filebase. Previously at a video codec startup.</span>
+      </div>
+    </footer>
+
+    <section class="related" data-od-id="related-posts">
+      <h3>Related posts</h3>
+      <div class="related-grid">
+        <article class="related-card">
+          <div class="thumb" aria-hidden="true"></div>
+          <h4>Encrypting blocks before they leave your laptop</h4>
+          <p>How we designed the E2E key hierarchy.</p>
+          <p class="date">Mar 12, 2026</p>
+        </article>
+        <article class="related-card">
+          <div class="thumb" aria-hidden="true"></div>
+          <h4>Bandwidth budgets for archive folders</h4>
+          <p>Cap egress per project without throttling editors.</p>
+          <p class="date">Feb 28, 2026</p>
+        </article>
+        <article class="related-card">
+          <div class="thumb" aria-hidden="true"></div>
+          <h4>Shipping sync engine v3</h4>
+          <p>Content-defined chunking in plain language.</p>
+          <p class="date">Jan 15, 2026</p>
+        </article>
+      </div>
+    </section>
   </article>
 </body>
 </html>

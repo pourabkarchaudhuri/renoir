@@ -84,6 +84,15 @@ export function fixMixedContent(html: string): string {
     .replace(/(<link[^>]*\bhref\s*=\s*["'])http:\/\//gi, '$1https://');
 }
 
+/** Add lang="en" to html root when missing. */
+export function fixHtmlLang(html: string): string {
+  if (/<html[^>]*\blang\s*=/i.test(html)) return html;
+  return html.replace(/<html(\s[^>]*)?>/i, (m) => {
+    if (m.includes('lang=')) return m;
+    return m.replace(/>$/, ' lang="en">');
+  });
+}
+
 /** Default viewport when still missing after normalization. */
 export function fixViewportMeta(html: string): string {
   if (/<meta[^>]+name=["']viewport["']/i.test(html)) return html;
@@ -140,6 +149,7 @@ export function fixDashboardNestedScroll(html: string): string {
  */
 export function fixArtifactLintFindings(html: string, opts: LintFixOptions = {}): string {
   let out = html;
+  out = fixHtmlLang(out);
   out = fixViewportMeta(out);
   out = fixImgAlt(out);
   out = fixNoopenerLinks(out);

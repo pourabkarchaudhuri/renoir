@@ -32,11 +32,13 @@ export function isAutoContinuePrompt(content: string): boolean {
 /**
  * Creates a fresh AutoContinueState with sensible defaults.
  */
-export function createInitialAutoState(): AutoContinueState {
+export function createInitialAutoState(
+  maxAttempts = DEFAULT_AUTO_CONTINUE_CONFIG.maxAttempts,
+): AutoContinueState {
   return {
     enabled: true,
     attempts: 0,
-    maxAttempts: DEFAULT_AUTO_CONTINUE_CONFIG.maxAttempts,
+    maxAttempts,
     isAutoContinuing: false,
   };
 }
@@ -61,9 +63,14 @@ export function shouldAutoContinue(
   finishReason: string | undefined,
   pendingAssistant: string,
   state: AutoContinueState,
+  opts?: { skillId?: string },
 ): boolean {
+  const limit = state.maxAttempts;
   if (!state.enabled) return false;
-  if (state.attempts >= state.maxAttempts) return false;
+  if (state.attempts >= limit) return false;
+
+  // User cancelled — never resume regardless of partial artifact state.
+  if (finishReason === 'aborted' || finishReason === 'cancelled') return false;
 
   const lower = pendingAssistant.toLowerCase();
   const hasClosingTag = lower.includes('</artifact>');

@@ -4,6 +4,10 @@
 import { MOBILE_SIDEBAR_BRIDGE_FN } from './preview-mobile-sidebar';
 import { DASHBOARD_BRIDGE_FN } from '@shared/dashboard-layout';
 import { DECK_CONTRAST_BRIDGE_FN, countDeckSlides } from './preview-deck-contrast';
+import { PICK_BRIDGE_FN } from './preview-pick-bridge';
+import { SCROLL_SYNC_BRIDGE_FN } from './preview-scroll-sync';
+import { A11Y_PROBE_BRIDGE_FN } from './preview-a11y-probe';
+import { FLOW_BRIDGE_FN } from './preview-flow-bridge';
 
 export { countDeckSlides };
 
@@ -96,6 +100,10 @@ export const NAV_BRIDGE = `
 ${MOBILE_SIDEBAR_BRIDGE_FN}
 ${DASHBOARD_BRIDGE_FN}
 ${DECK_CONTRAST_BRIDGE_FN}
+${PICK_BRIDGE_FN}
+${SCROLL_SYNC_BRIDGE_FN}
+${A11Y_PROBE_BRIDGE_FN}
+${FLOW_BRIDGE_FN}
   var STYLE_ID = '__renoir_mode_style';
   var SCROLL_STYLE_ID = '__renoir_scroll_style';
   var SLIDE_CLASS = 'renoir-slide';
@@ -110,6 +118,8 @@ ${DECK_CONTRAST_BRIDGE_FN}
     return false;
   }
   function slides() {
+    var flowScreens = document.querySelectorAll('[data-screen-id]');
+    if (flowScreens.length >= 2) return Array.from(flowScreens);
     var dataSlides = document.querySelectorAll('[data-slide]');
     if (dataSlides.length) return Array.from(dataSlides);
     var deck = document.querySelector('.deck') || document.getElementById('deck');
@@ -320,6 +330,7 @@ ${DECK_CONTRAST_BRIDGE_FN}
     activeIdx = focus(activeIdx, activeMode);
   }
   function bootPresentIfDeck() {
+    if (document.querySelectorAll('[data-screen-id]').length >= 2) return;
     var list = slides();
     if (list.length > 1 && list[0] !== document.body) {
       activeMode = 'present';
@@ -378,6 +389,20 @@ ${DECK_CONTRAST_BRIDGE_FN}
       applyDashboardContainment();
       rerenderCharts();
       reportSize();
+    } else if (d.type === 'renoir:pick-enable') {
+      setPickEnabled(true);
+    } else if (d.type === 'renoir:pick-disable') {
+      setPickEnabled(false);
+    } else if (d.type === 'renoir:scroll-sync') {
+      applyScrollSync(d.y);
+    } else if (d.type === 'renoir:a11y-probe') {
+      runA11yProbe();
+    } else if (d.type === 'renoir:flow-enable') {
+      setFlowEnabled(true);
+    } else if (d.type === 'renoir:flow-disable') {
+      setFlowEnabled(false);
+    } else if (d.type === 'renoir:flow-nav') {
+      navigateToScreen(d.screenId);
     }
   });
   window.addEventListener('keydown', function (e) {

@@ -36,6 +36,7 @@ interface ChatStartReq {
   conversationId: string;
   messages: ChatMessageLite[];
   temperature?: number;
+  maxTokens?: number;
 }
 
 interface ActiveCall {
@@ -154,7 +155,7 @@ function shouldRetry(err: unknown, status?: number): boolean {
 }
 
 export async function startChat(req: ChatStartReq): Promise<{ ok: boolean; error?: string }> {
-  const { conversationId, messages, temperature } = req;
+  const { conversationId, messages, temperature, maxTokens } = req;
   const resolved = await resolveRoute();
   if (!resolved.ok) {
     broadcast({ type: 'error', conversationId, message: resolved.reason });
@@ -185,7 +186,7 @@ export async function startChat(req: ChatStartReq): Promise<{ ok: boolean; error
     let attempts = 0;
     while (true) {
       try {
-        const ok = await runOnce({ conversationId, route, messages, temperature, ctrl, call });
+        const ok = await runOnce({ conversationId, route, messages, temperature, maxTokens, ctrl, call });
         if (ok) break;
         // runOnce returned false = transient error already handled with retry broadcast
         attempts++;
@@ -221,6 +222,7 @@ interface RunOnceArgs {
   route: ResolvedRoute;
   messages: ChatStartReq['messages'];
   temperature?: number;
+  maxTokens?: number;
   ctrl: AbortController;
   call: ActiveCall;
 }
@@ -281,7 +283,8 @@ function temperatureUnsupported(status: number, bodyText: string): boolean {
 }
 
 async function runOnce(args: RunOnceArgs): Promise<boolean> {
-  const { conversationId, route, messages, temperature, ctrl, call } = args;
+  const { conversationId, route, messages, temperature, maxTokens, ctrl, call } = args;
+  const tokenCap = maxTokens ?? 16384;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   let bodyJson: Record<string, unknown>;
 
@@ -299,7 +302,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     const rest = processedMessages.filter((m) => m.role !== 'system');
     bodyJson = withTemperature({
       model: route.model,
-      max_tokens: 16384,
+      max_tokens: tokenCap,
       stream: true,
       ...(sys ? { system: sys } : {}),
       messages: rest.map((m) => {
@@ -331,6 +334,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     bodyJson = withTemperature({
       model: route.model,
       stream: true,
+      max_output_tokens: tokenCap,
       ...(sys ? { instructions: sys } : {}),
       input: rest.map((m) => {
         const imgs = m.images;
@@ -357,6 +361,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     headers.Authorization   = `Bearer ${route.apiKey}`;
     bodyJson = withTemperature({
       model: route.model,
+      max_tokens: tokenCap,
       messages: processedMessages.map((m) => {
         const imgs = m.images;
         if (imgs.length > 0) {
@@ -382,6 +387,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     headers.Authorization = `Bearer ${route.apiKey}`;
     bodyJson = withTemperature({
       model: route.model,
+      max_tokens: tokenCap,
       messages: processedMessages.map((m) => {
         const imgs = m.images;
         if (imgs.length > 0) {
