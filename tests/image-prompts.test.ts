@@ -37,6 +37,16 @@ describe('deriveImagePrompt', () => {
       expect(result.prompt).toContain('Team photo at office');
     });
 
+    it('uses labelText from ph-img when alt text is absent', () => {
+      const placeholder = makePlaceholder({
+        kind: 'placeholder-div',
+        context: { className: 'ph-img wide', labelText: 'Hero visual' },
+        sizing: { aspectRatio: '16 / 9' },
+      });
+      const result = deriveImagePrompt({ placeholder });
+      expect(result.prompt).toContain('Hero visual');
+    });
+
     it('ignores generic alt text like "placeholder"', () => {
       const placeholder = makePlaceholder({ context: { altText: 'placeholder' } });
       const result = deriveImagePrompt({ placeholder });
@@ -96,16 +106,16 @@ describe('deriveImagePrompt', () => {
   });
 
   describe('aspect-ratio-based size selection', () => {
-    it('selects 1536x1024 for landscape (width > height × 1.2)', () => {
+    it('always uses 1024x1024 regardless of landscape sizing', () => {
       const placeholder = makePlaceholder({ sizing: { width: '500px', height: '300px' } });
       const result = deriveImagePrompt({ placeholder });
-      expect(result.size).toBe('1536x1024');
+      expect(result.size).toBe('1024x1024');
     });
 
-    it('selects 1024x1536 for portrait (height > width × 1.2)', () => {
+    it('always uses 1024x1024 regardless of portrait sizing', () => {
       const placeholder = makePlaceholder({ sizing: { width: '300px', height: '500px' } });
       const result = deriveImagePrompt({ placeholder });
-      expect(result.size).toBe('1024x1536');
+      expect(result.size).toBe('1024x1024');
     });
 
     it('selects 1024x1024 for square', () => {
@@ -120,10 +130,10 @@ describe('deriveImagePrompt', () => {
       expect(result.size).toBe('1024x1024');
     });
 
-    it('uses aspect-ratio CSS property when width/height not available', () => {
+    it('uses 1024x1024 when only aspect-ratio is set', () => {
       const placeholder = makePlaceholder({ sizing: { aspectRatio: '16/9' } });
       const result = deriveImagePrompt({ placeholder });
-      expect(result.size).toBe('1536x1024'); // 16/9 is landscape
+      expect(result.size).toBe('1024x1024');
     });
   });
 
@@ -301,24 +311,10 @@ describe('sanitize', () => {
 });
 
 describe('inferSizeFromPlaceholder', () => {
-  it('returns 1536x1024 for landscape', () => {
-    const p = makePlaceholder({ sizing: { width: '600px', height: '400px' } });
-    expect(inferSizeFromPlaceholder(p)).toBe('1536x1024');
-  });
-
-  it('returns 1024x1536 for portrait', () => {
-    const p = makePlaceholder({ sizing: { width: '400px', height: '600px' } });
-    expect(inferSizeFromPlaceholder(p)).toBe('1024x1536');
-  });
-
-  it('returns 1024x1024 for square', () => {
-    const p = makePlaceholder({ sizing: { width: '400px', height: '400px' } });
-    expect(inferSizeFromPlaceholder(p)).toBe('1024x1024');
-  });
-
-  it('returns 1024x1024 for near-square (within 1.2 ratio)', () => {
-    const p = makePlaceholder({ sizing: { width: '400px', height: '350px' } });
-    expect(inferSizeFromPlaceholder(p)).toBe('1024x1024');
+  it('always returns 1024x1024 (max 1024 per axis)', () => {
+    expect(inferSizeFromPlaceholder(makePlaceholder({ sizing: { width: '600px', height: '400px' } }))).toBe('1024x1024');
+    expect(inferSizeFromPlaceholder(makePlaceholder({ sizing: { width: '400px', height: '600px' } }))).toBe('1024x1024');
+    expect(inferSizeFromPlaceholder(makePlaceholder({ sizing: { aspectRatio: '16 / 9' } }))).toBe('1024x1024');
   });
 });
 
@@ -421,7 +417,7 @@ describe('deriveImagePrompt — property-based tests', () => {
    * **Validates: Requirements 2.6, 2.7, 2.8**
    * Property 4: Aspect-ratio-based size selection correctness.
    */
-  it('Property 4: size selection matches aspect ratio rules', () => {
+  it('Property 4: size selection is always 1024x1024 (max 1024 per axis)', () => {
     const dimensionedSizingArb = fc.record({
       width: fc.integer({ min: 32, max: 2000 }).map((n) => `${n}px`),
       height: fc.integer({ min: 32, max: 2000 }).map((n) => `${n}px`),
@@ -429,18 +425,9 @@ describe('deriveImagePrompt — property-based tests', () => {
 
     fc.assert(
       fc.property(dimensionedSizingArb, ({ width, height }) => {
-        const w = parseFloat(width);
-        const h = parseFloat(height);
         const placeholder = makePlaceholder({ sizing: { width, height } });
         const result = deriveImagePrompt({ placeholder });
-
-        if (w > h * 1.2) {
-          expect(result.size).toBe('1536x1024');
-        } else if (h > w * 1.2) {
-          expect(result.size).toBe('1024x1536');
-        } else {
-          expect(result.size).toBe('1024x1024');
-        }
+        expect(result.size).toBe('1024x1024');
       }),
       { numRuns: 200 }
     );

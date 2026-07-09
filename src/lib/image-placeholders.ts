@@ -4,7 +4,8 @@
  * Detection patterns:
  *  1. empty-img: <img> with no valid src (empty, "#", "about:blank", or containing "placeholder")
  *  2. color-block: <div>/<section> with background-color but no background-image
- *  3. placeholder-div: elements with class names containing placeholder-indicating terms
+ *  3. placeholder-div: elements with class names containing placeholder-indicating terms,
+ *     or `.ph-img` / `.img-slot` image boxes
  *  4. svg-rect: large SVG <rect> elements used as image placeholders
  *
  * Exclusion: elements smaller than 32×32 CSS pixels are excluded as decorative accents.
@@ -25,6 +26,8 @@ export interface Placeholder {
     siblingText?: string;
     ariaLabel?: string;
     className?: string;
+    /** Inner label text from image box elements (e.g. "[ Hero visual · 16:9 ]") */
+    labelText?: string;
   };
 }
 
@@ -129,8 +132,13 @@ function isColorBlock(el: Element): boolean {
 function hasPlaceholderClass(el: Element): boolean {
   const className = el.getAttribute('class') || '';
   if (!className) return false;
-  const lower = className.toLowerCase();
-  return lower.includes('placeholder') || lower.includes('img-placeholder');
+  const tokens = className.toLowerCase().split(/\s+/);
+  return tokens.some((t) =>
+    t.includes('placeholder') ||
+    t === 'img-placeholder' ||
+    t === 'ph-img' ||
+    t === 'img-slot'
+  );
 }
 
 /**
@@ -203,6 +211,28 @@ function getSiblingText(el: Element): string | undefined {
   return texts.length > 0 ? texts.join(' ') : undefined;
 }
 
+function getLabelText(el: Element): string | undefined {
+  const text = (el.textContent || '').trim();
+  if (!text) return undefined;
+  // Strip bracket wrappers and ratio suffixes common in ph-img labels
+  const cleaned = text
+    .replace(/^\[|\]$/g, '')
+    .replace(/\s*·\s*\d+:\d+\s*$/i, '')
+    .trim();
+  return cleaned || text.slice(0, 200);
+}
+
+function inferAspectRatioFromClasses(className: string): string | undefined {
+  const tokens = className.toLowerCase().split(/\s+/);
+  if (tokens.includes('wide') || tokens.includes('r-16x9')) return '16 / 9';
+  if (tokens.includes('square') || tokens.includes('r-1x1')) return '1 / 1';
+  if (tokens.includes('portrait') || tokens.includes('tall')) return '3 / 4';
+  if (tokens.includes('r-4x3')) return '4 / 3';
+  if (tokens.includes('r-3x2')) return '3 / 2';
+  if (tokens.includes('ph-img')) return '16 / 10';
+  return undefined;
+}
+
 function extractContext(el: Element): Placeholder['context'] {
   const ctx: Placeholder['context'] = {};
 
@@ -230,6 +260,13 @@ function extractContext(el: Element): Placeholder['context'] {
   const siblingText = getSiblingText(el);
   if (siblingText) ctx.siblingText = siblingText;
 
+  // Inner label text (ph-img, img-slot, etc.)
+  const classNameLower = (className || '').toLowerCase();
+  if (classNameLower.includes('ph-img') || classNameLower.includes('img-slot') || hasPlaceholderClass(el)) {
+    const labelText = getLabelText(el);
+    if (labelText) ctx.labelText = labelText;
+  }
+
   // Ensure at least one field is populated — use tag name as fallback
   if (Object.keys(ctx).length === 0) {
     ctx.className = el.tagName.toLowerCase();
@@ -256,9 +293,16 @@ function extractSizing(el: Element): Placeholder['sizing'] {
   if (hMatch) sizing.height = hMatch[1].trim();
   else if (heightAttr) sizing.height = heightAttr.includes('px') || heightAttr.includes('%') ? heightAttr : `${heightAttr}px`;
 
-  // Aspect ratio
+  // Aspect ratio from inline style
   const arMatch = style.match(/(?:^|;)\s*aspect-ratio\s*:\s*([^;]+)/i);
   if (arMatch) sizing.aspectRatio = arMatch[1].trim();
+
+  // Fall back to class-based aspect ratio (ph-img modifiers, img-slot ratios)
+  if (!sizing.aspectRatio) {
+    const className = el.getAttribute('class') || '';
+    const inferred = inferAspectRatioFromClasses(className);
+    if (inferred) sizing.aspectRatio = inferred;
+  }
 
   return sizing;
 }

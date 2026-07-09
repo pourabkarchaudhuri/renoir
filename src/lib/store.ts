@@ -5,6 +5,7 @@ import type {
 } from '@/types/global';
 import { hydrateProject, switchSkillSession, syncActiveSession, patchSkillSession, getSkillSession, streamStateForSkill, conversationForSkill, withInProgressAssistant, applySession, loadSession, projectHasSkillWork, clearInheritedStudyTitle } from '@/lib/skill-sessions';
 import { extractArtifact } from '@/lib/prompt';
+import { notifyArtifactImageReady } from '@/lib/image-post-process';
 import { loadPreviewSurface, savePreviewSurface, type PreviewSurface } from '@/lib/preview-surfaces';
 import { saveWorkspaceSnapshot } from '@/lib/workspace-persist';
 
@@ -621,6 +622,13 @@ export const useStudio = create<StudioState>((set, get) => ({
           previewHtml: html,
         });
       }
+      notifyArtifactImageReady({
+        html: art.html,
+        projectId: forSave.id,
+        skillId,
+        conversation: conv,
+        productName: forSave.name,
+      });
     } else {
       const forSave = skillId === viewingSkillId
         ? syncActiveSession({ ...project, conversation: conv }, skillId)

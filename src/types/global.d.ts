@@ -225,6 +225,7 @@ export interface RenoirAPI {
   chatCancel: (id: string) => Promise<boolean>;
   buildMarketingSite: (brief: { productName?: string; tagline?: string }) => Promise<{ ok: boolean; html?: string; error?: string }>;
   buildBlogPost: (brief: { companyName?: string; headline?: string }) => Promise<{ ok: boolean; html?: string; error?: string }>;
+  buildChangelog: (brief: { productName?: string }) => Promise<{ ok: boolean; html?: string; error?: string }>;
   onChatEvent: (cb: (e: ChatStreamEvent) => void) => () => void;
   chatRoute: () => Promise<{ ready: boolean; source: string; kind: 'anthropic' | 'azure' | 'azure-responses' | 'openai' | 'none' }>;
   themeSet: (t: 'dark' | 'light') => Promise<{ ok: boolean }>;

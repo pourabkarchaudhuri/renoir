@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, protocol, net } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -80,6 +81,7 @@ import { ensurePreviewWindow, pushPreviewHtml, isPreviewOpen } from './preview-w
 import { exportArtifactToPptx } from './pptx.js';
 import { buildMarketingSiteFromBrief } from './marketing-site.js';
 import { buildBlogPostFromBrief } from './blog-post.js';
+import { buildChangelogFromBrief } from './changelog.js';
 import { listProjectAssets } from './assets.js';
 
 let mainWindow: BrowserWindow | null = null;
@@ -260,6 +262,13 @@ function registerIpc(): void {
       return { ok: false, error: String(err?.message || err) };
     }
   });
+  ipcMain.handle('renoir:changelog:instant', (_e, brief: { productName?: string }) => {
+    try {
+      return { ok: true, html: buildChangelogFromBrief(brief) };
+    } catch (err: any) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
 
   // Theme — sync titlebar overlay color in real time on Windows.
   ipcMain.handle('renoir:theme:set', (_e, theme: 'dark' | 'light') => {
@@ -283,6 +292,7 @@ function registerIpc(): void {
   ipcMain.handle('renoir:image:generate', (_e, req) => generateImage(req));
   ipcMain.handle('renoir:image:edit',     (_e, req) => editImage(req));
   ipcMain.handle('renoir:image:generateBatch', async (_e, req: { items?: any[]; projectId?: string; concurrency?: number }) => {
+    const azureOk = azureImageConfigured();
     // Validate non-empty items array
     if (!req?.items || !Array.isArray(req.items) || req.items.length === 0) {
       return { ok: false, results: [] };
@@ -294,10 +304,11 @@ function registerIpc(): void {
       }
     }
     // Validate Azure is configured
-    if (!azureImageConfigured()) {
+    if (!azureOk) {
       return { ok: false, results: req.items.map((i: any) => ({ id: i.id || '', ok: false, error: 'Azure image is not configured' })) };
     }
-    return batchGenerateImages(req as any);
+    const result = await batchGenerateImages(req as any);
+    return result;
   });
 
   // Critique (5-dim)

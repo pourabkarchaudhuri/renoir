@@ -38,15 +38,20 @@ describe('userRequestedImages', () => {
     ])).toBe(true);
   });
 
-  it('prompts for image permission on product-deck instead of auto-running', () => {
+  it('prompts for image permission when placeholders may exist (any skill)', () => {
     expect(skillPromptsForImagePermission('product-deck')).toBe(true);
-    expect(skillPromptsForImagePermission('pitch-deck')).toBe(false);
+    expect(skillPromptsForImagePermission('web-prototype')).toBe(true);
+    expect(skillPromptsForImagePermission('pitch-deck')).toBe(true);
     expect(shouldRunImagePipeline(
       [{ role: 'user', content: 'Brief: audience: PMs' }],
     )).toBe(false);
     expect(shouldPromptForImagePermission(
       [{ role: 'user', content: 'Brief: audience: PMs' }],
       'product-deck',
+    )).toBe(true);
+    expect(shouldPromptForImagePermission(
+      [{ role: 'user', content: 'Build a landing page for a bakery' }],
+      'web-prototype',
     )).toBe(true);
     expect(shouldPromptForImagePermission(
       [{ role: 'user', content: 'Build the deck and generate images' }],

@@ -7,9 +7,8 @@ import { Splitter } from '@/components/studio/Splitter';
 import { extractArtifact, extractQuestionForm, composeSystemPrompt, hasLockedBrief, extractBriefFromConversation, inferPhase, conversationForLlm } from '@/lib/prompt';
 import { hasBrandContent, resolveBrandSpec } from '@/lib/brand-spec';
 import { processArtifactImages } from '@/lib/image-pipeline';
-import { extractPlaceholders } from '@/lib/image-placeholders';
-import { shouldRunImagePipeline, shouldPromptForImagePermission } from '@/lib/image-request';
 import { enrichProductDeckHtml } from '@/lib/product-deck-content';
+import { planImagePostProcess, setArtifactImageListener } from '@/lib/image-post-process';
 import { repairArtifactIfNeeded } from '@/lib/artifact-repair';
 import { generationBudgetForSkill, FAST_PATH_SKILL_IDS } from '@shared/generation-budgets';
 import { applySession, findSkillForConversation, getSkillSession, patchSkillSession, previewHtmlForSkill } from '@/lib/skill-sessions';
@@ -59,6 +58,7 @@ export function Studio() {
     skillId: string;
     slotCount: number;
   } | null>(null);
+  const deferredLintRef = useRef<{ html: string; projectId: string; skillId?: string } | null>(null);
 
   useEffect(() => {
     const off = window.renoir.onChatEvent((e: ChatStreamEvent) => {
@@ -115,28 +115,27 @@ export function Studio() {
           setAutoContinue((s) => ({ ...s, isAutoContinuing: false }));
           void finishStream().then(() => {
             const after = useStudio.getState();
-            if (!after.project || after.selectedSkillId !== skillId) return;
-            const lastMsg = after.project.conversation.findLast((m) => m.role === 'assistant');
+            if (!after.project) return;
+            const session = getSkillSession(after.project, skillId);
+            const conversation = session.conversation?.length
+              ? session.conversation
+              : after.project.conversation;
+            const lastMsg = [...conversation].reverse().find((m) => m.role === 'assistant');
             if (!lastMsg) return;
             const art = extractArtifact(lastMsg.content);
             if (!art?.complete) return;
-
-            if (shouldRunImagePipeline(after.project.conversation)) {
-              void runImagePipeline(art.html, after.project.id, skillId);
-              return;
+            const plan = planImagePostProcess({
+              html: art.html,
+              projectId: after.project.id,
+              skillId,
+              conversation,
+              productName: after.project.name,
+            });
+            if ((plan.shouldPrompt && plan.slotCount > 0) || plan.autoRun) {
+              deferredLintRef.current = { html: art.html, projectId: after.project.id, skillId };
+            } else {
+              void maybePersistLintFixes(art.html, after.project.id, skillId, { skip: FAST_PATH_SKILL_IDS.has(skillId) });
             }
-
-            if (shouldPromptForImagePermission(after.project.conversation, skillId)) {
-              const proposal = prepareImagePermissionPrompt(
-                art.html,
-                after.project.id,
-                skillId,
-                after.project.name,
-              );
-              if (proposal) setImageGenPrompt(proposal);
-            }
-
-            void maybePersistLintFixes(art.html, after.project.id, skillId, { skip: FAST_PATH_SKILL_IDS.has(skillId) });
           });
         }
       } else if (e.type === 'stalled') {
@@ -198,24 +197,62 @@ export function Studio() {
       setImageGenProgress(null);
 
       if (imagesGenerated > 0) {
-        // Save enriched HTML as a new version (task 8.2)
         const verRes = await window.renoir.addVersion({
           id: projectId,
           html: enrichedHtml,
           source: 'assistant',
+          skillId,
           note: `Auto-generated ${imagesGenerated} images`,
         });
         if (verRes.ok && verRes.project) {
-          useStudio.getState().setProject(verRes.project);
+          let next = patchSkillSession(verRes.project, skillId, {
+            previewHtml: enrichedHtml,
+            versions: getSkillSession(verRes.project, skillId).versions,
+          });
+          if (skillId === useStudio.getState().selectedSkillId) {
+            next = applySession(next, skillId);
+          }
+          useStudio.getState().setProject(next);
         }
-        // Show toast notification (task 8.3)
         toast(`Generated ${imagesGenerated} images`, 'ok');
+        deferredLintRef.current = null;
+        void maybePersistLintFixes(enrichedHtml, projectId, skillId, { skip: FAST_PATH_SKILL_IDS.has(skillId ?? '') });
+      } else {
+        toast('Image generation failed — placeholders kept', 'warn');
+        const deferred = deferredLintRef.current;
+        if (deferred) {
+          deferredLintRef.current = null;
+          void maybePersistLintFixes(deferred.html, deferred.projectId, deferred.skillId, { skip: FAST_PATH_SKILL_IDS.has(deferred.skillId ?? '') });
+        }
       }
-    } catch {
-      // Pipeline failed — original artifact remains visible
+    } catch (err) {
+      toast('Image generation error — placeholders kept', 'err');
       setImageGenProgress(null);
     }
   };
+
+  const runImagePipelineRef = useRef(runImagePipeline);
+  runImagePipelineRef.current = runImagePipeline;
+
+  useEffect(() => {
+    setArtifactImageListener((ctx) => {
+      const plan = planImagePostProcess(ctx);
+
+      if (plan.autoRun) {
+        void runImagePipelineRef.current(plan.prepared, plan.projectId, plan.skillId);
+        return;
+      }
+      if (plan.shouldPrompt && plan.slotCount > 0) {
+        setImageGenPrompt({
+          html: plan.prepared,
+          projectId: plan.projectId,
+          skillId: plan.skillId,
+          slotCount: plan.slotCount,
+        });
+      }
+    });
+    return () => setArtifactImageListener(null);
+  }, []);
 
   const sendUserMessage = async (content: string, opts?: { skipAppend?: boolean; attachments?: any[]; isAutoContinue?: boolean }) => {
     if (!project || (!content.trim() && !opts?.attachments?.length)) return;
@@ -342,6 +379,12 @@ export function Studio() {
   const completeArtifactHtml = useMemo(() => {
     if (liveExtracted?.complete) return liveExtracted.html;
 
+    // Post-processed HTML (generated images, lint fixes) wins over the raw conversation artifact.
+    if (!awaitingNewArtifact) {
+      const processedHtml = previewHtmlForSkill(project!, selectedSkillId);
+      if (processedHtml) return processedHtml;
+    }
+
     const assistantComplete = !isStreaming && lastAssistant && !awaitingNewArtifact
       ? extractArtifact(lastAssistant.content)
       : null;
@@ -352,8 +395,6 @@ export function Studio() {
     // While waiting for a new LLM artifact, never resurface a cached template.
     if (awaitingNewArtifact) return null;
 
-    const cachedHtml = previewHtmlForSkill(project!, selectedSkillId);
-    if (cachedHtml) return cachedHtml;
     return null;
   }, [activeVersion, liveExtracted, isStreaming, lastAssistant, project, selectedSkillId, awaitingNewArtifact]);
 
@@ -423,13 +464,13 @@ export function Studio() {
     <div className="flex h-full flex-col">
       <ConfirmDialog
         open={!!imageGenPrompt}
-        title="Generate slide images?"
+        title="Generate images?"
         message={
           imageGenPrompt ? (
             <>
-              This deck has <span className="text-foreground font-medium">{imageGenPrompt.slotCount}</span> image
-              {imageGenPrompt.slotCount === 1 ? '' : 's'} ready for AI generation (cover and feature slides).
-              Generate photos now? You can skip and keep the text-only preview.
+              This page has <span className="text-foreground font-medium">{imageGenPrompt.slotCount}</span> image
+              {imageGenPrompt.slotCount === 1 ? ' box' : ' boxes'} ready for AI generation.
+              Generate images now? You can skip and keep the placeholder preview.
             </>
           ) : null
         }
@@ -441,7 +482,14 @@ export function Studio() {
           setImageGenPrompt(null);
           void runImagePipeline(html, projectId, skillId);
         }}
-        onCancel={() => setImageGenPrompt(null)}
+        onCancel={() => {
+          const deferred = deferredLintRef.current;
+          setImageGenPrompt(null);
+          if (deferred) {
+            deferredLintRef.current = null;
+            void maybePersistLintFixes(deferred.html, deferred.projectId, deferred.skillId, { skip: FAST_PATH_SKILL_IDS.has(deferred.skillId ?? '') });
+          }
+        }}
       />
       {truncated && (
         <div className="px-4 py-2 bg-amber-500/15 border-b border-amber-500/40 text-[12px] text-amber-800 dark:text-amber-200 flex items-center gap-2">
@@ -514,21 +562,6 @@ function StudioLayout({ chat, preview }: { chat: React.ReactNode; preview: React
       </div>
     </div>
   );
-}
-
-function prepareImagePermissionPrompt(
-  html: string,
-  projectId: string,
-  skillId: string,
-  productName?: string,
-): { html: string; projectId: string; skillId: string; slotCount: number } | null {
-  let prepared = html;
-  if (skillId === 'product-deck') {
-    prepared = enrichProductDeckHtml(html, { productName, finalize: true }).html;
-  }
-  const slotCount = extractPlaceholders(prepared).length;
-  if (slotCount === 0) return null;
-  return { html: prepared, projectId, skillId, slotCount };
 }
 
 async function maybePersistLintFixes(

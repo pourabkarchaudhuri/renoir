@@ -3,6 +3,10 @@ import {
   buildBlogPostPreviewHtml,
 } from '@/lib/blog-post-preview';
 import {
+  changelogBriefFromStudioContext,
+  buildChangelogPreviewHtml,
+} from '@/lib/changelog-preview';
+import {
   marketingBriefFromStudioContext,
   buildMarketingSitePreviewHtml,
 } from '@/lib/marketing-site-preview';
@@ -29,6 +33,11 @@ export async function buildStagedPreviewHtml(
   if (skillId === 'saas-landing') {
     const brief = marketingBriefFromStudioContext(promptText, opts);
     return buildMarketingSitePreviewHtml(brief, designSystem, direction);
+  }
+
+  if (skillId === 'changelog') {
+    const brief = changelogBriefFromStudioContext(promptText, opts);
+    return buildChangelogPreviewHtml(brief, designSystem, direction);
   }
 
   return null;

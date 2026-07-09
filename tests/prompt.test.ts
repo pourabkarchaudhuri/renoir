@@ -58,6 +58,18 @@ describe('prompt composer', () => {
     expect(r.system).toContain('never <question-form>');
   });
 
+  it('injects changelog layout contract when skill is changelog', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'changelog', name: 'Changelog', category: 'web', emoji: '🗒️', blurb: 'Release notes.' },
+      primer: 'Single-screen changelog.',
+    });
+    expect(r.system).toContain('# Changelog — single-screen release notes');
+    expect(r.system).toContain('"changelog-header"');
+    expect(r.system).toContain('"changelog-filters"');
+    expect(r.system).toContain('"changelog-entries"');
+    expect(r.system).toContain('never <question-form>');
+  });
+
   it('injects design system tokens', () => {
     const r = composeSystemPrompt({
       designSystem: { id: 'ember', name: 'Ember', vibe: 'Warm', swatches: [], font: 'Inter' },
@@ -100,6 +112,19 @@ describe('artifact extraction', () => {
     expect(r).not.toBeNull();
     expect(r!.complete).toBe(false);
     expect(r!.html.startsWith('<!doctype')).toBe(true);
+  });
+
+  it('parses artifact tags with attributes (web-prototype contract)', () => {
+    const text = [
+      'Here is your site.',
+      '<artifact identifier="bakery-site" type="text/html" title="Bakery">',
+      '<!doctype html><html><body><div class="ph-img wide">[ Hero ]</div></body></html>',
+      '</artifact>',
+    ].join('\n');
+    const r = extractArtifact(text);
+    expect(r).not.toBeNull();
+    expect(r!.complete).toBe(true);
+    expect(r!.html).toContain('ph-img');
   });
 
   it('returns null when no artifact tag present', () => {

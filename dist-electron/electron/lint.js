@@ -4,6 +4,7 @@
 import { isDashboardArtifact, missingDashboardRegions, normalizeDashboardRegionIds, tagHeuristicDashboardRegions } from '../shared/dashboard-layout.js';
 import { lintDashboardCharts } from '../shared/dashboard-charts.js';
 import { lintMarketingSiteFlow } from '../shared/marketing-site-layout.js';
+import { lintChangelogRegions } from '../shared/changelog-layout.js';
 const RULES = [
     (html) => /<!doctype/i.test(html) ? null
         : { level: 'error', rule: 'doctype', message: 'Missing <!doctype html> declaration' },
@@ -151,6 +152,16 @@ const RULES = [
             message: flowIssue.message,
         };
     },
+    (html) => {
+        const regionIssue = lintChangelogRegions(html);
+        if (!regionIssue)
+            return null;
+        return {
+            level: 'warn',
+            rule: regionIssue.rule,
+            message: regionIssue.message,
+        };
+    },
 ];
 const RULE_META = {
     doctype: { category: 'structure' },
@@ -175,6 +186,7 @@ const RULE_META = {
     'dashboard-nested-scroll': { category: 'dashboard', fixable: true },
     'marketing-screens': { category: 'structure', fixable: true },
     'marketing-flow-links': { category: 'structure', fixable: true },
+    'changelog-regions': { category: 'structure', fixable: true },
 };
 function enrichFinding(f) {
     const meta = RULE_META[f.rule];

@@ -5,6 +5,7 @@
 import { isDashboardArtifact, missingDashboardRegions, normalizeDashboardRegionIds, tagHeuristicDashboardRegions } from '../shared/dashboard-layout.js';
 import { lintDashboardCharts } from '../shared/dashboard-charts.js';
 import { isMarketingSiteArtifact, lintMarketingSiteFlow } from '../shared/marketing-site-layout.js';
+import { lintChangelogRegions } from '../shared/changelog-layout.js';
 
 export interface LintFinding {
   level: 'error' | 'warn' | 'info';
@@ -152,6 +153,15 @@ const RULES: ((html: string) => LintFinding | null)[] = [
       message: flowIssue.message,
     };
   },
+  (html) => {
+    const regionIssue = lintChangelogRegions(html);
+    if (!regionIssue) return null;
+    return {
+      level: 'warn',
+      rule: regionIssue.rule,
+      message: regionIssue.message,
+    };
+  },
 ];
 
 const RULE_META: Record<string, Pick<LintFinding, 'category' | 'fixable'>> = {
@@ -177,6 +187,7 @@ const RULE_META: Record<string, Pick<LintFinding, 'category' | 'fixable'>> = {
   'dashboard-nested-scroll': { category: 'dashboard', fixable: true },
   'marketing-screens': { category: 'structure', fixable: true },
   'marketing-flow-links': { category: 'structure', fixable: true },
+  'changelog-regions': { category: 'structure', fixable: true },
 };
 
 function enrichFinding(f: LintFinding): LintFinding {

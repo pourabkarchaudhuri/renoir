@@ -20,6 +20,7 @@ const C = {
   chatRoute:  'renoir:chat:route',
   marketingInstant: 'renoir:marketing:instant',
   blogPostInstant: 'renoir:blog-post:instant',
+  changelogInstant: 'renoir:changelog:instant',
   themeSet:   'renoir:theme:set',
 
   agentsList:   'renoir:agents:list',
@@ -100,6 +101,7 @@ contextBridge.exposeInMainWorld('renoir', {
   chatRoute:  () => ipcRenderer.invoke(C.chatRoute),
   buildMarketingSite: (brief) => ipcRenderer.invoke(C.marketingInstant, brief),
   buildBlogPost: (brief) => ipcRenderer.invoke(C.blogPostInstant, brief),
+  buildChangelog: (brief) => ipcRenderer.invoke(C.changelogInstant, brief),
   themeSet:   (t) => ipcRenderer.invoke(C.themeSet, t),
   onChatEvent: (cb) => {
     const handler = (_e, payload) => cb(payload);

@@ -65,6 +65,7 @@ import { ensurePreviewWindow, pushPreviewHtml, isPreviewOpen } from './preview-w
 import { exportArtifactToPptx } from './pptx.js';
 import { buildMarketingSiteFromBrief } from './marketing-site.js';
 import { buildBlogPostFromBrief } from './blog-post.js';
+import { buildChangelogFromBrief } from './changelog.js';
 import { listProjectAssets } from './assets.js';
 let mainWindow = null;
 let closeConfirmed = false;
@@ -241,6 +242,14 @@ function registerIpc() {
             return { ok: false, error: String(err?.message || err) };
         }
     });
+    ipcMain.handle('renoir:changelog:instant', (_e, brief) => {
+        try {
+            return { ok: true, html: buildChangelogFromBrief(brief) };
+        }
+        catch (err) {
+            return { ok: false, error: String(err?.message || err) };
+        }
+    });
     // Theme — sync titlebar overlay color in real time on Windows.
     ipcMain.handle('renoir:theme:set', (_e, theme) => {
         if (process.platform !== 'win32')
@@ -268,6 +277,7 @@ function registerIpc() {
     ipcMain.handle('renoir:image:generate', (_e, req) => generateImage(req));
     ipcMain.handle('renoir:image:edit', (_e, req) => editImage(req));
     ipcMain.handle('renoir:image:generateBatch', async (_e, req) => {
+        const azureOk = azureImageConfigured();
         // Validate non-empty items array
         if (!req?.items || !Array.isArray(req.items) || req.items.length === 0) {
             return { ok: false, results: [] };
@@ -279,10 +289,11 @@ function registerIpc() {
             }
         }
         // Validate Azure is configured
-        if (!azureImageConfigured()) {
+        if (!azureOk) {
             return { ok: false, results: req.items.map((i) => ({ id: i.id || '', ok: false, error: 'Azure image is not configured' })) };
         }
-        return batchGenerateImages(req);
+        const result = await batchGenerateImages(req);
+        return result;
     });
     // Critique (5-dim)
     ipcMain.handle('renoir:critique:start', (_e, req) => startCritique(req));

@@ -3,6 +3,7 @@
 import type { SkillSummary, DesignSystemSummary, VisualDirection, BrandSpec } from '@/types/global';
 import { dashboardLayoutPromptLines } from '@shared/dashboard-layout';
 import { blogPostPromptLines } from '@shared/blog-post-layout';
+import { changelogPromptLines } from '@shared/changelog-layout';
 import { marketingSitePromptLines } from '@shared/marketing-site-layout';
 import { FAST_PATH_SKILL_IDS } from '@shared/generation-budgets';
 import { productDeckPromptLines } from '@/lib/product-deck-content';
@@ -351,6 +352,13 @@ export function composeSystemPrompt(opts: {
     lines.push('Skill override: emit the <artifact> immediately on turn 1 — never <question-form>.');
   }
 
+  if (opts.skill?.id === 'changelog') {
+    lines.push('');
+    lines.push(...changelogPromptLines());
+    lines.push('');
+    lines.push('Skill override: emit the <artifact> immediately on turn 1 — never <question-form>.');
+  }
+
   if (opts.brand) {
     lines.push('');
     lines.push('# Brand spec (extracted)');
@@ -381,25 +389,33 @@ export interface ExtractedArtifact {
   complete: boolean;
 }
 
+/** Opening <artifact> tag — allows attributes (identifier, type, title, etc.). */
+const ARTIFACT_OPEN_RE = /<artifact\b[^>]*>/i;
+
 /**
  * Pull the first <artifact> block from a streamed assistant message.
  * Returns a partial when the closing tag has not arrived yet so the
  * preview iframe can re-render progressively as the stream lands.
  */
 export function extractArtifact(text: string): ExtractedArtifact | null {
-  const closed = text.match(/<artifact>([\s\S]*?)<\/artifact>/i);
-  if (closed) return { html: closed[1].trim(), complete: true };
-  const open = text.match(/<artifact>([\s\S]*)$/i);
-  if (open) return { html: open[1].trimStart(), complete: false };
-  return null;
+  const openTag = text.match(ARTIFACT_OPEN_RE);
+  if (!openTag || openTag.index === undefined) return null;
+
+  const contentStart = openTag.index + openTag[0].length;
+  const afterOpen = text.slice(contentStart);
+  const closeMatch = afterOpen.match(/<\/artifact>/i);
+  if (closeMatch && closeMatch.index !== undefined) {
+    return { html: afterOpen.slice(0, closeMatch.index).trim(), complete: true };
+  }
+  return { html: afterOpen.trimStart(), complete: false };
 }
 
 /** Strip the artifact span (open or closed) from a streamed assistant
  *  message so the chat surface never shows raw HTML. */
 export function stripArtifact(text: string): string {
   return text
-    .replace(/<artifact>[\s\S]*?<\/artifact>/gi, '')
-    .replace(/<artifact>[\s\S]*$/i, '')
+    .replace(/<artifact\b[^>]*>[\s\S]*?<\/artifact>/gi, '')
+    .replace(/<artifact\b[^>]*>[\s\S]*$/i, '')
     .replace(/<question-form>[\s\S]*?<\/question-form>/gi, '')
     .replace(/<question-form>[\s\S]*$/i, '')
     .trim();
@@ -430,9 +446,9 @@ export function inferPhase(text: string, elapsedMs: number): string {
     return flavor[Math.floor(elapsedMs / 1800) % flavor.length];
   }
   if (/<question-form>/i.test(text)) return 'Locking the brief…';
-  const open = text.match(/<artifact>([\s\S]*)$/i);
-  if (open) {
-    const tail = open[1].slice(-600).toLowerCase();
+  const openTag = text.match(ARTIFACT_OPEN_RE);
+  if (openTag && openTag.index !== undefined) {
+    const tail = text.slice(openTag.index + openTag[0].length).slice(-600).toLowerCase();
     if (/<\/?footer/.test(tail))                  return 'Closing the footer…';
     if (/<\/?form/.test(tail))                    return 'Building forms…';
     if (/<table|grid-cols|<\/?ul|<\/?ol/.test(tail)) return 'Laying out the grid…';

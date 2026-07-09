@@ -38,6 +38,12 @@ function getImageReference(dataUrl: string, savedPath?: string): string {
   return dataUrl;
 }
 
+/** CSS-safe url() — data URIs must be quoted because they contain semicolons. */
+function cssUrl(imageRef: string): string {
+  const escaped = imageRef.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  return `url("${escaped}")`;
+}
+
 /**
  * Check if an element is an <img> tag.
  */
@@ -107,7 +113,7 @@ function replaceBackgroundColor(el: Element, imageRef: string): void {
   }
 
   // Add background-image and background-size for proper display
-  const bgImage = `background-image: url(${imageRef}); background-size: cover; background-position: center;`;
+  const bgImage = `background-image: ${cssUrl(imageRef)}; background-size: cover; background-position: center;`;
 
   // Clean up any trailing/leading semicolons and whitespace
   newStyle = newStyle.replace(/;\s*;/g, ';').replace(/^\s*;\s*/, '').trim();
@@ -121,6 +127,63 @@ function replaceBackgroundColor(el: Element, imageRef: string): void {
   newStyle += bgImage;
 
   el.setAttribute('style', newStyle.trim());
+}
+
+/**
+ * Clear inner text from image box placeholders so labels don't overlay the photo.
+ */
+function clearPlaceholderLabel(el: Element): void {
+  el.textContent = '';
+  const style = el.getAttribute('style') || '';
+  let newStyle = style;
+  if (newStyle && !newStyle.endsWith(';')) {
+    newStyle += '; ';
+  } else if (newStyle) {
+    newStyle += ' ';
+  }
+  if (!/color\s*:/i.test(newStyle)) {
+    newStyle += 'color: transparent;';
+  }
+  el.setAttribute('style', newStyle.trim());
+}
+
+/**
+ * Apply a generated image to a non-img placeholder element.
+ * Uses the `background` shorthand for ph-img/img-slot so class-level gradients are fully replaced.
+ */
+function applyBackgroundImage(el: Element, imageRef: string): void {
+  const className = (el.getAttribute('class') || '').toLowerCase();
+  const isImageBox = className.includes('ph-img') || className.includes('img-slot');
+
+  let newStyle = (el.getAttribute('style') || '')
+    .replace(/background(?:-image|-size|-position|-repeat|-color)?\s*:[^;]+;?/gi, '')
+    .replace(/;\s*;/g, ';')
+    .trim();
+
+  const bgRule = isImageBox
+    ? `background: ${cssUrl(imageRef)} center/cover no-repeat;`
+    : `background-image: ${cssUrl(imageRef)}; background-size: cover; background-position: center;`;
+
+  if (newStyle && !newStyle.endsWith(';')) {
+    newStyle += '; ';
+  } else if (newStyle) {
+    newStyle += ' ';
+  }
+  newStyle += bgRule;
+  el.setAttribute('style', newStyle.trim());
+  clearPlaceholderLabel(el);
+}
+
+/**
+ * Serialize the parsed document back to HTML, preserving full documents when the input had one.
+ */
+function serializeDocument(doc: Document, originalHtml: string): string {
+  const hadFullDocument = /<html[\s>]/i.test(originalHtml);
+  if (!hadFullDocument) {
+    return doc.body.innerHTML;
+  }
+  const doctype = originalHtml.match(/<!doctype[^>]*>/i)?.[0] ?? '<!doctype html>';
+  return `${doctype}\n${doc.documentElement.outerHTML}`;
 }
 
 // ─── Main Function ───────────────────────────────────────────────────────────
@@ -183,19 +246,8 @@ export function replacePlaceholders(
         replaceBackgroundColor(el, imageRef);
         replaced++;
       } else {
-        // For other elements (placeholder-div, svg-rect, etc.): try setting as background-image
-        // or if it can hold an img child, handle accordingly
-        const style = el.getAttribute('style') || '';
-        let newStyle = style;
-        if (newStyle && !newStyle.endsWith(';')) {
-          newStyle += '; ';
-        } else if (newStyle) {
-          newStyle += ' ';
-        } else {
-          newStyle = '';
-        }
-        newStyle += `background-image: url(${imageRef}); background-size: cover; background-position: center;`;
-        el.setAttribute('style', newStyle.trim());
+        // For other elements (placeholder-div, svg-rect, etc.): set background-image
+        applyBackgroundImage(el, imageRef);
         replaced++;
       }
     } catch (err) {
@@ -205,9 +257,7 @@ export function replacePlaceholders(
     }
   }
 
-  // Serialize back to HTML string
-  // Use the body's innerHTML to get the content without the wrapping <html><head><body> tags
-  const serialized = doc.body.innerHTML;
+  const serialized = serializeDocument(doc, html);
 
   return {
     html: serialized,

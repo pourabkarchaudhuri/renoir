@@ -97,7 +97,7 @@ export async function processArtifactImages(
     }
 
     // Step 5: Replace placeholders in HTML
-    const { html, replaced } = replacePlaceholders(artifactHtml, replacements);
+    const { html, replaced, failed, errors } = replacePlaceholders(artifactHtml, replacements);
 
     return { html, imagesGenerated: replaced };
   } catch {

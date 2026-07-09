@@ -1,10 +1,8 @@
 /**
  * Detect whether the user explicitly asked for AI-generated images.
- * Product Deck and similar skills prompt for permission instead of auto-running.
+ * When image boxes are detected after artifact generation, Renoir prompts
+ * for permission unless the user already opted in or out in chat.
  */
-
-/** Skills that show an image-generation permission dialog when placeholders exist. */
-const SKILL_IMAGE_PERMISSION = new Set(['product-deck']);
 
 const OPT_OUT =
   /\b(?:no|don't|do not|skip|without|avoid)\b[^.!?\n]{0,40}\b(?:generate|generating|generated|ai)\b[^.!?\n]{0,20}\bimages?\b/i;
@@ -35,8 +33,8 @@ export function userRequestedImages(userText: string): boolean {
 }
 
 /** True when the skill should ask before running the image pipeline. */
-export function skillPromptsForImagePermission(skillId?: string): boolean {
-  return Boolean(skillId && SKILL_IMAGE_PERMISSION.has(skillId));
+export function skillPromptsForImagePermission(_skillId?: string): boolean {
+  return true;
 }
 
 /** True when the user explicitly declined AI images in their message. */
@@ -61,12 +59,11 @@ export function shouldRunImagePipeline(
   return conversationRequestsImages(messages);
 }
 
-/** Whether to show an image permission dialog (skill default, user has not opted in/out). */
+/** Whether to show an image permission dialog (user has not opted in/out). */
 export function shouldPromptForImagePermission(
   messages: { role: string; content: string }[],
-  skillId?: string,
+  _skillId?: string,
 ): boolean {
-  if (!skillPromptsForImagePermission(skillId)) return false;
   const lastUser = [...messages].reverse().find((m) => m.role === 'user');
   if (!lastUser) return true;
   if (userRequestedImages(lastUser.content)) return false;

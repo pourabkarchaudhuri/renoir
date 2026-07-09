@@ -110,7 +110,7 @@ describe('replacePlaceholders', () => {
 
       const result = replacePlaceholders(html, results);
       expect(result.replaced).toBe(1);
-      expect(result.html).toContain('background-image: url(data:image/png;base64,');
+      expect(result.html).toContain('background-image: url(&quot;data:image/png;base64,');
       expect(result.html).toContain('background-size: cover');
       expect(result.html).not.toContain('background-color');
     });
@@ -334,6 +334,36 @@ describe('replacePlaceholders', () => {
       const result = replacePlaceholders(html, results);
       expect(result.replaced).toBe(1);
       expect(result.html).toContain('background-image: url(');
+    });
+
+    it('clears ph-img label text when filling image boxes', () => {
+      const html = '<div class="ph-img wide" style="width:400px;height:225px">[ Hero visual · 16:9 ]</div>';
+      const results = new Map([
+        ['body > div', { dataUrl: makeDataUrl() }],
+      ]);
+
+      const result = replacePlaceholders(html, results);
+      expect(result.replaced).toBe(1);
+      expect(result.html).toContain('background: url(&quot;data:image/png;base64,');
+      expect(result.html).not.toContain('Hero visual');
+      expect(result.html).toContain('color: transparent');
+    });
+
+    it('preserves full HTML documents when replacing placeholders', () => {
+      const html = `<!doctype html>
+<html><head><style>.ph-img { background: linear-gradient(red, blue); }</style></head>
+<body><div class="ph-img wide" style="width:400px;height:225px">[ Hero ]</div></body></html>`;
+      const results = new Map([
+        ['body > div', { dataUrl: makeDataUrl() }],
+      ]);
+
+      const result = replacePlaceholders(html, results);
+      expect(result.replaced).toBe(1);
+      expect(result.html).toMatch(/^<!doctype html>/i);
+      expect(result.html).toContain('<html');
+      expect(result.html).toContain('<head>');
+      expect(result.html).toContain('<style>.ph-img');
+      expect(result.html).toContain('background: url(&quot;data:image/png;base64,');
     });
   });
 });
