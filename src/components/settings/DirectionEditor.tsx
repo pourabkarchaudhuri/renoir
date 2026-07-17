@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Save, Wand2 } from 'lucide-react';
 import type { CustomDirection } from '@/types/global';
@@ -15,6 +15,13 @@ export function DirectionEditor({
 
   const update = <K extends keyof CustomDirection>(k: K, v: CustomDirection[K]) =>
     draft && setDraft({ ...draft, [k]: v });
+
+  const error = useMemo(() => {
+    if (!draft) return '';
+    if (!draft.name.trim()) return 'Name is required.';
+    if (draft.swatches.filter(Boolean).length < 2) return 'Add at least two swatches.';
+    return '';
+  }, [draft]);
 
   return (
     <AnimatePresence>
@@ -56,10 +63,11 @@ export function DirectionEditor({
                   ))}
                 </div>
               </Field>
+              {error && <p className="text-[12px] text-destructive">{error}</p>}
             </div>
             <footer className="px-5 py-3 border-t border-border flex items-center justify-end gap-2">
               <button onClick={onClose} className="btn-quiet">Cancel</button>
-              <button onClick={async () => { await onSave(draft); onClose(); }} className="btn-ember">
+              <button onClick={async () => { if (!error) { await onSave(draft); onClose(); } }} className="btn-ember" disabled={Boolean(error)}>
                 <Save className="h-4 w-4" />
                 Save direction
               </button>

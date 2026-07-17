@@ -29,6 +29,7 @@ import { DevicePreviewFrame } from './DevicePreviewFrame';
 import { PreviewLoading } from './PreviewLoading';
 import { RecordPreviewDialog } from './RecordPreviewDialog';
 import { VariantCompareDialog } from './VariantCompareDialog';
+import { SkillExportMenu } from './SkillExportMenu';
 import { isFeatureEnabled } from '@/lib/features';
 import { artifactHasFlowLinks } from '@/lib/flow-screens';
 import type { PreviewGenerationProgress } from '@/lib/preview-generation-progress';
@@ -354,19 +355,6 @@ export function PreviewPane({
     else toast(res.error || 'Save failed', 'err');
   };
 
-  const exportPdf = async () => {
-    if (!artifact || !project) return;
-    const id = useUI.getState().pushExport({ kind: 'pdf', label: 'Exporting PDF' });
-    try {
-      useUI.getState().updateExport(id, { phase: 'rendering offscreen…' });
-      const res = await window.renoir.exportPdf({ projectId: project.id, html: baseHtml! });
-      if (res.ok) useUI.getState().completeExport(id, { savedPath: res.savedPath, ok: true });
-      else useUI.getState().completeExport(id, { ok: false, error: res.error });
-    } catch (err: any) {
-      useUI.getState().completeExport(id, { ok: false, error: err?.message || String(err) });
-    }
-  };
-
   const exportPptx = async () => {
     if (!artifact || !project) return;
     const id = useUI.getState().pushExport({ kind: 'pptx', label: 'Exporting PPTX' });
@@ -674,11 +662,11 @@ export function PreviewPane({
         )}
         <div className="ml-auto flex items-center gap-1.5">
           {artifact && <LintBadge html={baseHtml} />}
+          <SkillExportMenu skillId={skillId} streaming={streaming} />
           <FullViewToggle />
           <OverflowMenu
             items={[
               { label: 'Save as HTML',      icon: <SaveIcon className="h-3.5 w-3.5" strokeWidth={1.6} />,     onClick: downloadHtml,       disabled: !artifact, group: 'save' },
-              { label: 'Export PDF',        icon: <FileText className="h-3.5 w-3.5" strokeWidth={1.6} />,     onClick: exportPdf,          disabled: !artifact, group: 'save' },
               { label: 'Export PPTX',       icon: <PresentIcon className="h-3.5 w-3.5" strokeWidth={1.6} />,  onClick: exportPptx,         disabled: !artifact, group: 'save' },
               { label: 'Save as template',  icon: <BookmarkPlus className="h-3.5 w-3.5" strokeWidth={1.6} />, onClick: saveAsTemplate,     disabled: !artifact, group: 'save' },
               { label: 'Reload preview',    icon: <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.6} />, onClick: reloadPreviews,     disabled: !artifact, group: 'view' },

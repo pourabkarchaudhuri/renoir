@@ -16,10 +16,12 @@ export function ProjectStudiesSection({
   projects,
   onOpen,
   onSaveProject,
+  emptyMessage,
 }: {
   projects: ProjectRecord[];
   onOpen: (p: ProjectRecord) => void;
   onSaveProject: (p: ProjectRecord) => Promise<void>;
+  emptyMessage?: string;
 }) {
   const [query, setQuery] = useState('');
   const [tagFilter, setTagFilter] = useState<string | null>(null);
@@ -96,7 +98,9 @@ export function ProjectStudiesSection({
       </div>
 
       {filtered.length === 0 && (
-        <p className="text-[12px] text-muted-foreground mt-4">No studies match your filters.</p>
+        <p className="text-[12px] text-muted-foreground mt-4">
+          {query || tagFilter ? 'No studies match your filters.' : (emptyMessage || 'No studies yet.')}
+        </p>
       )}
 
       {filtered.length > 6 && !showAll && (

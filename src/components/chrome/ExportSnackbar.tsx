@@ -2,15 +2,18 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useUI } from '@/lib/store';
 import {
   Loader2, FileText, Presentation, Package, X, CheckCircle2, AlertTriangle, FolderOpen,
-  Image as ImageIcon, Film, Music2, Layers3, Clapperboard,
+  Image as ImageIcon, Film, Music2, Layers3, Clapperboard, FileType, FileDown, RotateCcw,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import type { Job } from '@/lib/store';
 import { ExpandableMessage } from './ExpandableMessage';
+import type { ExportFormat } from '@shared/export/types';
 
 const KIND_ICON: Record<string, typeof FileText> = {
   pdf:         FileText,
   pptx:        Presentation,
+  docx:        FileType,
+  markdown:    FileDown,
   zip:         Package,
   image:       ImageIcon,
   'image-edit': ImageIcon,
@@ -39,11 +42,42 @@ export function ExportSnackbar() {
   );
 }
 
+async function retryExportJob(job: Job): Promise<void> {
+  const params = job.params;
+  if (!params?.document || !params?.format) return;
+  const format = params.format as ExportFormat;
+  const jobId = useUI.getState().pushJob({
+    kind: format === 'markdown' ? 'markdown' : format === 'docx' ? 'docx' : 'pdf',
+    label: job.label,
+    params,
+  });
+  try {
+    useUI.getState().updateJob(jobId, { phase: 'Retrying…' });
+    const res = await window.renoir.exportDocument({
+      format,
+      document: params.document as Parameters<typeof window.renoir.exportDocument>[0]['document'],
+      defaultFilename: params.defaultFilename as string | undefined,
+      projectId: params.projectId as string | undefined,
+    });
+    if (res.ok) {
+      useUI.getState().completeJob(jobId, { ok: true, savedPath: res.savedPath });
+    } else if (res.error !== 'cancelled') {
+      useUI.getState().completeJob(jobId, { ok: false, error: res.error });
+    } else {
+      useUI.getState().dismissJob(jobId);
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    useUI.getState().completeJob(jobId, { ok: false, error: message });
+  }
+}
+
 function JobRow({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
   const Icon = KIND_ICON[job.kind] || FileText;
   const tone = job.status === 'ok' ? 'ok' : job.status === 'err' ? 'err' : 'running';
   const errorText = job.error || 'Failed';
   const isErrorExpandable = tone === 'err';
+  const canRetry = Boolean(tone === 'err' && job.params?.document && job.params?.format);
 
   return (
     <motion.div
@@ -102,6 +136,16 @@ function JobRow({ job, onDismiss }: { job: Job; onDismiss: () => void }) {
           </div>
         )}
       </div>
+      {canRetry && (
+        <button
+          onClick={() => { void retryExportJob(job); onDismiss(); }}
+          className="btn-ghost text-[11px] py-0.5 h-7 shrink-0 gap-1"
+          title="Retry export"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+          Retry
+        </button>
+      )}
       {tone === 'ok' && job.savedPath && (
         <button
           onClick={() => window.renoir.openWorkspace()}

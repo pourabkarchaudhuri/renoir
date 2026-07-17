@@ -25,5 +25,8 @@ export const IPC = {
     projectRead: 'renoir:projects:read',
     // Workspace
     workspaceOpen: 'renoir:workspace:open',
+    workspaceGet: 'renoir:workspace:get',
     workspaceWrite: 'renoir:workspace:write',
+    // Document export
+    exportDocument: 'renoir:export:document',
 };

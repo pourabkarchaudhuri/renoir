@@ -9,9 +9,10 @@ export interface LLMMessage {
 }
 
 export interface BYOKConfig {
-  baseUrl: string;          // e.g. https://api.openai.com/v1
-  model: string;            // e.g. gpt-4o, claude-opus-4-7, gpt-5.4
-  hasKey: boolean;          // never expose key to renderer
+  baseUrl: string;
+  model: string;
+  hasKey: boolean;
+  keySource?: 'keychain' | 'env' | 'none';
 }
 
 export interface ImageGenRequest {
@@ -29,9 +30,13 @@ export interface ImageGenResult {
 
 export interface AzureStatus {
   configured: boolean;
+  imageConfigured?: boolean;
   imageDeployment?: string;
   textDeployment?: string;
+  audioDeployment?: string;
+  videoDeployment?: string;
   endpoint?: string;
+  imageEndpoint?: string;
 }
 
 export interface ChatStartRequest {
@@ -103,7 +108,11 @@ export const IPC = {
 
   // Workspace
   workspaceOpen:  'renoir:workspace:open',
+  workspaceGet:   'renoir:workspace:get',
   workspaceWrite: 'renoir:workspace:write',
+
+  // Document export
+  exportDocument: 'renoir:export:document',
 } as const;
 
 export type IpcChannel = typeof IPC[keyof typeof IPC];

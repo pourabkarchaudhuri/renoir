@@ -11,7 +11,7 @@ import { saveWorkspaceSnapshot } from '@/lib/workspace-persist';
 
 export type Route = 'home' | 'studio' | 'gallery' | 'settings' | 'media';
 
-export type JobKind = 'pdf' | 'pptx' | 'zip' | 'image' | 'image-edit' | 'audio' | 'video' | 'storyboard' | 'hyperframe';
+export type JobKind = 'pdf' | 'pptx' | 'docx' | 'markdown' | 'zip' | 'image' | 'image-edit' | 'audio' | 'video' | 'storyboard' | 'hyperframe';
 
 export interface Job {
   id: string;
@@ -50,14 +50,14 @@ interface UIState {
   setPaletteOpen: (v: boolean) => void;
   jobs: Job[];
   pushJob: (input: { kind: JobKind; label: string; params?: Record<string, unknown> }) => string;
-  updateJob: (id: string, patch: Partial<Pick<Job, 'phase' | 'progress' | 'label'>>) => void;
+  updateJob: (id: string, patch: Partial<Pick<Job, 'phase' | 'progress' | 'label' | 'params'>>) => void;
   completeJob: (id: string, patch: {
     ok: boolean; savedPath?: string; savedPaths?: string[]; dataUrls?: string[];
     videoPath?: string; framesDir?: string; error?: string;
   }) => void;
   dismissJob: (id: string) => void;
   // legacy alias kept for ExportSnackbar (so older imports still resolve)
-  pushExport: (e: { kind: 'pdf' | 'pptx' | 'zip'; label: string }) => string;
+  pushExport: (e: { kind: 'pdf' | 'pptx' | 'docx' | 'markdown' | 'zip'; label: string; params?: Record<string, unknown> }) => string;
   updateExport: (id: string, patch: { phase?: string }) => void;
   completeExport: (id: string, patch: { ok: boolean; savedPath?: string; error?: string }) => void;
   chatWidth: number;            // 0–100, percent of the chat+preview row
@@ -166,7 +166,7 @@ export const useUI = create<UIState>((set, get) => ({
   },
   dismissJob: (id) => set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) })),
   // Legacy bridge for ExportSnackbar callers — delegates to the same backing slice.
-  pushExport: (e) => get().pushJob({ kind: e.kind, label: e.label }),
+  pushExport: (e) => get().pushJob({ kind: e.kind, label: e.label, params: e.params }),
   updateExport: (id, patch) => get().updateJob(id, { phase: patch.phase }),
   completeExport: (id, patch) => get().completeJob(id, {
     ok: patch.ok, savedPath: patch.savedPath, error: patch.error,

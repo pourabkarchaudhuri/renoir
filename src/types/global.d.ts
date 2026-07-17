@@ -4,15 +4,18 @@ export interface ByokConfig {
   baseUrl: string;
   model: string;
   hasKey: boolean;
+  keySource?: 'keychain' | 'env' | 'none';
 }
 
 export interface AzureStatus {
   configured: boolean;
+  imageConfigured?: boolean;
   imageDeployment?: string;
   textDeployment?: string;
   audioDeployment?: string;
   videoDeployment?: string;
   endpoint?: string;
+  imageEndpoint?: string;
 }
 
 export interface SkillSummary {
@@ -295,6 +298,7 @@ export interface RenoirAPI {
   importProject: () => Promise<{ ok: boolean; project?: ProjectRecord; error?: string }>;
 
   openWorkspace: () => Promise<{ ok: boolean; path: string }>;
+  getWorkspace: () => Promise<{ path: string }>;
   writeArtifact: (req: {
     projectId: string; filename: string; content: string; encoding?: 'utf8' | 'base64';
   }) => Promise<{ ok: boolean; path?: string; error?: string }>;
@@ -320,6 +324,26 @@ export interface RenoirAPI {
 
   exportPptx: (req: {
     projectId: string; html: string; filename?: string;
+  }) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
+
+  exportDocument: (req: {
+    format: 'pdf' | 'docx' | 'markdown';
+    document: {
+      title: string;
+      subtitle?: string;
+      description?: string;
+      skillId?: string;
+      skillName?: string;
+      projectId?: string;
+      createdAt: string;
+      modifiedAt: string;
+      inputs?: { label: string; value: string }[];
+      blocks: unknown[];
+      metadata?: Record<string, string>;
+      previewHtml?: string;
+    };
+    defaultFilename?: string;
+    projectId?: string;
   }) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
 
   visionDescribe: (req: {

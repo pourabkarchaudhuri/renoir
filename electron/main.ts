@@ -74,6 +74,7 @@ import { startCritique } from './critique.js';
 import { editImage } from './image.js';
 import { customCatalog } from './customCatalog.js';
 import { exportArtifactToPdf } from './pdf.js';
+import { exportDocumentToFile } from './export/index.js';
 import { describeImage } from './vision.js';
 import { renderStoryboard } from './storyboard.js';
 import { extractPalette } from './colors.js';
@@ -150,7 +151,8 @@ function registerIpc(): void {
   ipcMain.handle('renoir:byok:get', async () => {
     const cfg = store.getByok();
     const key = await secrets.getByokKey();
-    return { baseUrl: cfg.baseUrl ?? '', model: cfg.model ?? '', hasKey: Boolean(key) };
+    const keySource = await secrets.getByokKeySource();
+    return { baseUrl: cfg.baseUrl ?? '', model: cfg.model ?? '', hasKey: Boolean(key), keySource };
   });
   ipcMain.handle('renoir:byok:set', async (_e, payload: { baseUrl?: string; model?: string; apiKey?: string }) => {
     if (typeof payload?.baseUrl === 'string' || typeof payload?.model === 'string') {
@@ -317,6 +319,7 @@ function registerIpc(): void {
   // PDF + PPTX export
   ipcMain.handle('renoir:export:pdf',  (_e, req) => exportArtifactToPdf(req));
   ipcMain.handle('renoir:export:pptx', (_e, req) => exportArtifactToPptx(req));
+  ipcMain.handle('renoir:export:document', (_e, req) => exportDocumentToFile(req));
 
   // Persistent render assets per project
   ipcMain.handle('renoir:assets:list', (_e, req: { projectId: string }) =>
@@ -507,6 +510,7 @@ function registerIpc(): void {
 
   // Workspace
   ipcMain.handle('renoir:workspace:open',  () => openWorkspaceFolder());
+  ipcMain.handle('renoir:workspace:get',   () => ({ path: workspaceRoot() }));
   ipcMain.handle('renoir:workspace:write', (_e, req) => writeArtifact(req));
 }
 

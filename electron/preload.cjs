@@ -51,12 +51,14 @@ const C = {
   projectImport:  'renoir:projects:import',
 
   workspaceOpen:  'renoir:workspace:open',
+  workspaceGet:   'renoir:workspace:get',
   workspaceWrite: 'renoir:workspace:write',
 
   imageEdit: 'renoir:image:edit',
   critiqueStart: 'renoir:critique:start',
   exportPdf: 'renoir:export:pdf',
   exportPptx: 'renoir:export:pptx',
+  exportDocument: 'renoir:export:document',
   assetsList: 'renoir:assets:list',
 
   visionDescribe: 'renoir:vision:describe',
@@ -141,12 +143,14 @@ contextBridge.exposeInMainWorld('renoir', {
   importProject: ()   => ipcRenderer.invoke(C.projectImport),
 
   openWorkspace: () => ipcRenderer.invoke(C.workspaceOpen),
+  getWorkspace:  () => ipcRenderer.invoke(C.workspaceGet),
   writeArtifact: (req) => ipcRenderer.invoke(C.workspaceWrite, req),
 
   imageEdit:      (req) => ipcRenderer.invoke(C.imageEdit, req),
   critiqueStart:  (req) => ipcRenderer.invoke(C.critiqueStart, req),
   exportPdf:      (req) => ipcRenderer.invoke(C.exportPdf, req),
   exportPptx:     (req) => ipcRenderer.invoke(C.exportPptx, req),
+  exportDocument: (req) => ipcRenderer.invoke(C.exportDocument, req),
   listProjectAssets: (req) => ipcRenderer.invoke(C.assetsList, req),
 
   visionDescribe:  (req) => ipcRenderer.invoke(C.visionDescribe, req),

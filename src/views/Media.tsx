@@ -77,7 +77,7 @@ export function Media() {
               transition={{ duration: 0.16 }}
               className="px-6 py-5"
             >
-              {tab === 'image'      && <ImagePanel  azureReady={Boolean(azure?.configured)} projectId={project?.id} />}
+              {tab === 'image'      && <ImagePanel  azureReady={Boolean(azure?.imageConfigured ?? azure?.configured)} projectId={project?.id} />}
               {tab === 'video'      && <VideoPanel  azureReady={Boolean(azure?.videoDeployment)} projectId={project?.id} />}
               {tab === 'audio'      && <AudioPanel  azureReady={Boolean(azure?.audioDeployment || azure?.textDeployment)} projectId={project?.id} />}
               {tab === 'storyboard' && <StoryboardPanel projectId={project?.id} />}
