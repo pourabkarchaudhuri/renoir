@@ -450,15 +450,15 @@ describe('deriveImagePrompt — property-based tests', () => {
 
     fc.assert(
       fc.property(nonGenericAltArb, headingArb, (altText, heading) => {
-        // Test alt text incorporation
+        // Test alt text incorporation (sanitize collapses whitespace)
         const p1 = makePlaceholder({ context: { altText } });
         const r1 = deriveImagePrompt({ placeholder: p1 });
-        expect(r1.prompt).toContain(altText.trim());
+        expect(r1.prompt).toContain(sanitize(altText));
 
         // Test heading incorporation
         const p2 = makePlaceholder({ context: { altText: 'Some subject', nearestHeading: heading } });
         const r2 = deriveImagePrompt({ placeholder: p2 });
-        expect(r2.prompt).toContain(heading.trim());
+        expect(r2.prompt).toContain(sanitize(heading));
       }),
       { numRuns: 100 }
     );

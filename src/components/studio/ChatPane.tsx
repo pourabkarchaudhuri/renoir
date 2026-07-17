@@ -11,8 +11,9 @@ import type { AutoContinueState } from '@/lib/auto-continue';
 import { readFileAsAttachment, readClipboardImage, classify, MAX_ATTACHMENTS, type Attachment, summarizeAttachments } from '@/lib/attachments';
 import { ExpandableMessage } from '@/components/chrome/ExpandableMessage';
 import { syncActiveSession } from '@/lib/skill-sessions';
-import { pickEditDraft } from '@/lib/pick-target';
+import { pickEditDraftFromHtml } from '@/lib/pick-target';
 import type { ProjectMessage } from '@/types/global';
+import { previewHtmlForSkill } from '@/lib/skill-sessions';
 
 interface Props {
   onSend: (content: string, attachments?: Attachment[]) => void;
@@ -45,11 +46,15 @@ export function ChatPane({ onSend, onCancel, onRegenerate, onReloadPreview, hasP
         textPreview?: string;
       };
       if (!detail?.odId) return;
-      setDraft(pickEditDraft({
+      const st = useStudio.getState();
+      const html = st.project
+        ? previewHtmlForSkill(st.project, st.selectedSkillId)
+        : undefined;
+      setDraft(pickEditDraftFromHtml({
         odId: detail.odId,
         tag: detail.tag,
         textPreview: detail.textPreview,
-      }));
+      }, html));
     };
     window.addEventListener('renoir:pick-target', onPick);
     return () => window.removeEventListener('renoir:pick-target', onPick);
@@ -103,6 +108,7 @@ export function ChatPane({ onSend, onCancel, onRegenerate, onReloadPreview, hasP
         onSend={(attachments) => { if (draft.trim() || attachments?.length) onSend(draft, attachments); }}
         onCancel={onCancel}
         isStreaming={isStreaming}
+        hasPreview={hasPreview}
       />
     </section>
   );
@@ -412,13 +418,14 @@ function Message({ role, content, attachments, streaming }: { role: string; cont
 }
 
 function Composer({
-  value, onChange, onSend, onCancel, isStreaming,
+  value, onChange, onSend, onCancel, isStreaming, hasPreview,
 }: {
   value: string;
   onChange: (s: string) => void;
   onSend: (attachments?: Attachment[]) => void;
   onCancel: () => void;
   isStreaming: boolean;
+  hasPreview?: boolean;
 }) {
   const skills = useCatalog((s) => s.skills);
   const designSystems = useCatalog((s) => s.designSystems);
@@ -631,7 +638,9 @@ function Composer({
           }}
           onDragOver={(e) => e.preventDefault()}
           rows={2}
-          placeholder="Describe the artifact, or type / for skills, systems, agents…"
+          placeholder={hasPreview
+            ? 'Ask for a change — rewrite, expand, shorten, add an image…'
+            : 'Describe the artifact, or type / for skills, systems, agents…'}
           className="flex-1 bg-transparent outline-none resize-none text-[13.5px] leading-relaxed px-2 py-1.5"
         />
         {isStreaming ? (

@@ -11,6 +11,7 @@
  */
 
 import type { Placeholder } from './image-placeholders';
+import { clampImageSize, type SafeImageGenSize } from '@shared/image-size';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ export interface ImagePromptRequest {
 
 export interface DerivedImageRequest {
   prompt: string;
-  size: '1024x1024' | '1024x1536' | '1536x1024';
+  size: SafeImageGenSize;
   quality: 'low' | 'medium' | 'high';
   placeholderSelector: string;
 }
@@ -92,10 +93,26 @@ function parseDimension(value: string | undefined): number | null {
 
 /**
  * Determine image size based on placeholder aspect ratio.
- * All generated images use 1024×1024 (max 1024 on each axis per API constraint).
+ * Neither axis may exceed 1024px — oversized requests are scaled down
+ * proportionally via clampImageSize (Azure-safe result: 1024×1024).
  */
-export function inferSizeFromPlaceholder(_placeholder: Placeholder): DerivedImageRequest['size'] {
-  return '1024x1024';
+export function inferSizeFromPlaceholder(placeholder: Placeholder): DerivedImageRequest['size'] {
+  const { width, height, aspectRatio } = placeholder.sizing;
+  // Prefer explicit pixel dimensions when present; otherwise derive from AR.
+  const wPx = parseDimension(width);
+  const hPx = parseDimension(height);
+  if (wPx && hPx) {
+    return clampImageSize(`${Math.round(wPx)}x${Math.round(hPx)}`);
+  }
+  if (aspectRatio) {
+    const parts = aspectRatio.split('/').map((p) => parseFloat(p.trim()));
+    if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+      const ar = parts[0] / parts[1];
+      if (ar >= 1) return clampImageSize(`${1024}x${Math.round(1024 / ar)}`);
+      return clampImageSize(`${Math.round(1024 * ar)}x${1024}`);
+    }
+  }
+  return clampImageSize('1024x1024');
 }
 
 // ─── Hero Section Detection ──────────────────────────────────────────────────

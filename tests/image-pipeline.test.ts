@@ -111,7 +111,8 @@ describe('processArtifactImages', () => {
 
       const result = await processArtifactImages(html, 'test-project');
       expect(result.imagesGenerated).toBe(1);
-      expect(result.html).toContain('background: url(');
+      expect(result.html).toContain('<img');
+      expect(result.html).toContain('object-fit:cover');
       expect(result.html).not.toContain('Hero visual');
       expect(result.html).toMatch(/<html/i);
     });

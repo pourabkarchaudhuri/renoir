@@ -281,6 +281,18 @@ Hard rules:
 
 Keep CSS compact. No animations unless essential.`;
 
+/** Appended when the user is revising an existing complete artifact. */
+export const REVISION_PROMPT_ADDENDUM = `# Revision turn
+
+The conversation already has a complete artifact. Treat the latest <artifact> in context as the living source of truth (it may include post-processed images and lint fixes).
+
+Rules:
+1. Apply ONLY the user's requested change. Preserve all other content, layout, CSS, spacing, styling, images, tables, code blocks, references, and structure unless the user explicitly asks to change them.
+2. Identify the affected region (section, paragraph, element, or [data-od-id="…"] target when named) and edit surgically.
+3. Still emit ONE full self-contained HTML document inside a single <artifact>…</artifact> block — the preview pipeline requires a complete document.
+4. Outside the artifact: at most one short sentence stating what changed. No step-by-step narration.
+5. Do not emit <question-form>. Do not restart from a blank page.`;
+
 export function composeSystemPrompt(opts: {
   skill?: SkillSummary;
   primer?: string;
@@ -289,9 +301,16 @@ export function composeSystemPrompt(opts: {
   direction?: VisualDirection;
   brand?: BrandSpec;
   answers?: Record<string, string>;
+  /** When true, append surgical revision rules for post-creation edits. */
+  revision?: boolean;
 }): PromptComposition {
   const useSlimFrame = Boolean(opts.skill?.id && FAST_PATH_SKILL_IDS.has(opts.skill.id));
   const lines: string[] = [useSlimFrame ? FRAME_SLIM : FRAME];
+
+  if (opts.revision) {
+    lines.push('');
+    lines.push(REVISION_PROMPT_ADDENDUM);
+  }
 
   if (opts.skill) {
     lines.push('');

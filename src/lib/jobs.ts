@@ -3,6 +3,7 @@
 // Snackbar / Jobs panel can surface progress globally.
 
 import { useUI } from '@/lib/store';
+import { clampImageSize } from '@shared/image-size';
 
 interface ImageReq {
   prompt: string;
@@ -59,9 +60,10 @@ function shortPrompt(s: string): string {
 }
 
 export async function runImageJob(req: ImageReq): Promise<string> {
-  const id = ui().pushJob({ kind: 'image', label: `Image · ${shortPrompt(req.prompt)}`, params: { ...req } });
+  const clamped = { ...req, size: clampImageSize(req.size) };
+  const id = ui().pushJob({ kind: 'image', label: `Image · ${shortPrompt(req.prompt)}`, params: { ...clamped } });
   ui().updateJob(id, { phase: 'rendering on Foundry…' });
-  const res = await window.renoir.imageGenerate(req).catch((err) => ({
+  const res = await window.renoir.imageGenerate(clamped).catch((err) => ({
     ok: false as const, error: err?.message || String(err),
   } as { ok: false; error: string }));
   if (res.ok && (res as any).images) {
@@ -78,9 +80,10 @@ export async function runImageJob(req: ImageReq): Promise<string> {
 }
 
 export async function runImageEditJob(req: ImageEditReq): Promise<string> {
-  const id = ui().pushJob({ kind: 'image-edit', label: `Image edit · ${shortPrompt(req.prompt)}`, params: { ...req, imageBase64: '<elided>' } });
+  const clamped = { ...req, size: clampImageSize(req.size) };
+  const id = ui().pushJob({ kind: 'image-edit', label: `Image edit · ${shortPrompt(req.prompt)}`, params: { ...clamped, imageBase64: '<elided>' } });
   ui().updateJob(id, { phase: 'editing image…' });
-  const res = await window.renoir.imageEdit(req).catch((err) => ({ ok: false as const, error: err?.message || String(err) }));
+  const res = await window.renoir.imageEdit(clamped).catch((err) => ({ ok: false as const, error: err?.message || String(err) }));
   if (res.ok && (res as any).images) {
     const images = (res as any).images as { dataUrl: string; savedPath?: string }[];
     ui().completeJob(id, { ok: true, dataUrls: images.map((i) => i.dataUrl), savedPaths: images.map((i) => i.savedPath || '').filter(Boolean) });
@@ -117,7 +120,7 @@ export async function runAudioJob(req: AudioReq): Promise<string> {
 export async function runStoryboardJob(req: StoryboardReq): Promise<string> {
   const id = ui().pushJob({ kind: 'storyboard', label: `Storyboard · ${req.shots.length} shots`, params: { shots: req.shots.length } });
   ui().updateJob(id, { phase: `rendering ${req.shots.length} shots…` });
-  const res = await window.renoir.storyboardRender(req).catch((err) => ({ ok: false as const, error: err?.message || String(err) }));
+  const res = await window.renoir.storyboardRender({ ...req, size: clampImageSize(req.size) }).catch((err) => ({ ok: false as const, error: err?.message || String(err) }));
   if (res.ok && (res as any).frames) {
     ui().completeJob(id, {
       ok: true,

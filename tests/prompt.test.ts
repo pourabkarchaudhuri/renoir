@@ -212,6 +212,16 @@ describe('conversationForLlm', () => {
     const out = conversationForLlm(msgs, { keepLastArtifact: true });
     expect(out[1].content).toBe(partial);
   });
+
+  it('keeps the latest artifact for revision turns', () => {
+    const msgs = [
+      { role: 'user', content: 'Build' },
+      { role: 'assistant', content: 'Done.\n<artifact><html>v1</html></artifact>' },
+      { role: 'user', content: 'Shorten the hero' },
+    ];
+    const out = conversationForLlm(msgs, { keepLastArtifact: true });
+    expect(out[1].content).toContain('<html>v1</html>');
+  });
 });
 
 describe('brief lock', () => {
@@ -391,15 +401,18 @@ describe('composeSystemPrompt signature stability', () => {
       direction: { id: 'd1', name: 'Bold', vibe: 'Strong', swatches: ['#f00'], font: 'Inter', tagline: 'Go bold.' },
       brand: { name: 'Acme', voice: 'warm', audience: 'devs', colors: ['#fff'], fonts: ['Inter'], values: ['speed'], doNots: ['yelling'] },
       answers: { tone: 'minimal', audience: 'designers' },
+      revision: true,
     });
     expect(r).toHaveProperty('system');
     expect(typeof r.system).toBe('string');
+    expect(r.system).toContain('Revision turn');
   });
 
   it('does not export new symbols from src/lib/prompt.ts', async () => {
     const mod = await import('../src/lib/prompt');
     const exportedKeys = Object.keys(mod).sort();
     const expectedExports = [
+      'REVISION_PROMPT_ADDENDUM',
       'composeSystemPrompt',
       'conversationForLlm',
       'extractArtifact',

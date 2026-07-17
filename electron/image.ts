@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { azureConfig, azureImageConfigured } from './env.js';
 import { deriveAzureUrl } from './azure-url.js';
 import { projectDir, workspaceRoot } from './workspace.js';
+import { clampImageSize } from '../shared/image-size.js';
 
 export interface ImageGenRequest {
   prompt: string;
@@ -66,7 +67,7 @@ export async function editImage(req: ImageEditRequest): Promise<ImageGenResult> 
   };
   pushField('model', cfg.imageModel);
   pushField('prompt', req.prompt);
-  pushField('size', req.size || '1024x1024');
+  pushField('size', clampImageSize(req.size));
   pushField('n', String(Math.max(1, Math.min(4, req.n ?? 1))));
   pushFile('image', 'image.png', req.imageMime || 'image/png', req.imageBase64);
   if (req.maskBase64) pushFile('mask', 'mask.png', 'image/png', req.maskBase64);
@@ -136,7 +137,7 @@ export async function generateImage(req: ImageGenRequest): Promise<ImageGenResul
   const body: Record<string, unknown> = {
     model:  cfg.imageModel,
     prompt: req.prompt,
-    size:   req.size ?? '1024x1024',
+    size:   clampImageSize(req.size),
     n:      Math.max(1, Math.min(4, req.n ?? 1)),
   };
   if (req.quality) body.quality = req.quality;

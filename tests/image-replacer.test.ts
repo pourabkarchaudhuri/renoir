@@ -78,18 +78,19 @@ describe('replacePlaceholders', () => {
       expect(result.html).toContain('data:image/png;base64,');
     });
 
-    it('preserves width and height attributes on img', () => {
+    it('preserves width and height attributes on img via frame aspect-ratio', () => {
       const html = '<div><img src="" width="300" height="200" alt="test"></div>';
       const results = new Map([
         ['body > div > img', { dataUrl: makeDataUrl() }],
       ]);
 
       const result = replacePlaceholders(html, results);
-      expect(result.html).toContain('width="300"');
-      expect(result.html).toContain('height="200"');
+      expect(result.html).toContain('frame-img');
+      expect(result.html).toContain('aspect-ratio:300 / 200');
+      expect(result.html).toContain('src="data:image/png;base64,');
     });
 
-    it('preserves inline style dimensions on img', () => {
+    it('preserves inline style dimensions on img via the frame', () => {
       const html = '<div><img src="" style="width:400px;height:300px"></div>';
       const results = new Map([
         ['body > div > img', { dataUrl: makeDataUrl() }],
@@ -98,11 +99,37 @@ describe('replacePlaceholders', () => {
       const result = replacePlaceholders(html, results);
       expect(result.html).toContain('width:400px');
       expect(result.html).toContain('height:300px');
+      expect(result.html).toContain('frame-img');
+    });
+
+    it('wraps bare imgs in a frame-img figure', () => {
+      const html = '<div><img src="" alt="hero"></div>';
+      const results = new Map([
+        ['body > div > img', { dataUrl: makeDataUrl() }],
+      ]);
+
+      const result = replacePlaceholders(html, results);
+      expect(result.html).toMatch(/<figure[^>]*class="[^"]*frame-img/);
+      expect(result.html).toContain('object-fit:cover');
+      expect(result.html).toContain('object-position:center center');
+      expect(result.html).toContain('renoir-image-frame-styles');
+    });
+
+    it('keeps imgs already inside slide-visual without double-wrapping', () => {
+      const html = '<div class="slide-visual"><img src="" class="slide-image" width="960" height="540" alt="scene"></div>';
+      const results = new Map([
+        ['body > div > img', { dataUrl: makeDataUrl() }],
+      ]);
+
+      const result = replacePlaceholders(html, results);
+      expect(result.html).toContain('slide-visual');
+      expect(result.html).not.toMatch(/<figure[^>]*frame-img/);
+      expect(result.html).toContain('object-fit:cover');
     });
   });
 
   describe('color-block div replacement', () => {
-    it('replaces background-color with background-image', () => {
+    it('promotes color blocks to framed images', () => {
       const html = '<div style="background-color: #ff0000; width: 200px; height: 150px;"></div>';
       const results = new Map([
         ['body > div', { dataUrl: makeDataUrl() }],
@@ -110,9 +137,10 @@ describe('replacePlaceholders', () => {
 
       const result = replacePlaceholders(html, results);
       expect(result.replaced).toBe(1);
-      expect(result.html).toContain('background-image: url(&quot;data:image/png;base64,');
-      expect(result.html).toContain('background-size: cover');
-      expect(result.html).not.toContain('background-color');
+      expect(result.html).toContain('renoir-img-frame');
+      expect(result.html).toContain('<img');
+      expect(result.html).toContain('object-fit:cover');
+      expect(result.html).toContain('src="data:image/png;base64,');
     });
 
     it('preserves width and height in style', () => {
@@ -134,7 +162,8 @@ describe('replacePlaceholders', () => {
 
       const result = replacePlaceholders(html, results);
       expect(result.replaced).toBe(1);
-      expect(result.html).toContain('background-image: url(');
+      expect(result.html).toContain('<img');
+      expect(result.html).toContain('renoir-img-frame');
     });
 
     it('uses renoir-asset:// for large images in color blocks', () => {
@@ -149,7 +178,7 @@ describe('replacePlaceholders', () => {
   });
 
   describe('layout dimension preservation', () => {
-    it('does not alter element dimensions during replacement', () => {
+    it('does not alter frame dimensions during replacement', () => {
       const html = '<div><img src="" style="width:400px;height:300px;margin:10px" alt="test"></div>';
       const results = new Map([
         ['body > div > img', { dataUrl: makeDataUrl() }],
@@ -158,7 +187,7 @@ describe('replacePlaceholders', () => {
       const result = replacePlaceholders(html, results);
       expect(result.html).toContain('width:400px');
       expect(result.html).toContain('height:300px');
-      expect(result.html).toContain('margin:10px');
+      expect(result.html).toContain('frame-img');
     });
 
     it('preserves other style properties on color-block divs', () => {
@@ -172,6 +201,7 @@ describe('replacePlaceholders', () => {
       expect(result.html).toContain('height:150px');
       expect(result.html).toContain('border-radius:8px');
       expect(result.html).toContain('margin:16px');
+      expect(result.html).toContain('<img');
     });
   });
 
@@ -333,7 +363,9 @@ describe('replacePlaceholders', () => {
 
       const result = replacePlaceholders(html, results);
       expect(result.replaced).toBe(1);
-      expect(result.html).toContain('background-image: url(');
+      expect(result.html).toContain('<img');
+      expect(result.html).toContain('renoir-img-frame');
+      expect(result.html).toContain('object-fit:cover');
     });
 
     it('clears ph-img label text when filling image boxes', () => {
@@ -344,8 +376,10 @@ describe('replacePlaceholders', () => {
 
       const result = replacePlaceholders(html, results);
       expect(result.replaced).toBe(1);
-      expect(result.html).toContain('background: url(&quot;data:image/png;base64,');
-      expect(result.html).not.toContain('Hero visual');
+      expect(result.html).toContain('<img');
+      expect(result.html).toContain('object-fit:cover');
+      expect(result.html).not.toContain('[ Hero visual');
+      expect(result.html).toContain('alt="Hero visual"');
       expect(result.html).toContain('color: transparent');
     });
 
@@ -363,7 +397,8 @@ describe('replacePlaceholders', () => {
       expect(result.html).toContain('<html');
       expect(result.html).toContain('<head>');
       expect(result.html).toContain('<style>.ph-img');
-      expect(result.html).toContain('background: url(&quot;data:image/png;base64,');
+      expect(result.html).toContain('<img');
+      expect(result.html).toContain('renoir-image-frame-styles');
     });
   });
 });
@@ -424,15 +459,14 @@ describe('replacePlaceholders — property-based tests', () => {
         // Property: replaced + failed === results.size
         expect(result.replaced + result.failed).toBe(results.size);
 
-        // Property: element count is preserved
+        // Property: each bare img gains a figure.frame-img wrapper (+1 element)
         const originalCount = countElements(html);
         const resultCount = countElements(result.html);
-        expect(resultCount).toBe(originalCount);
+        expect(resultCount).toBe(originalCount + result.replaced);
 
-        // Property: nesting structure is preserved
-        const originalStructure = getStructure(html);
-        const resultStructure = getStructure(result.html);
-        expect(resultStructure).toBe(originalStructure);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(result.html, 'text/html');
+        expect(doc.querySelectorAll('figure.frame-img > img').length).toBe(result.replaced);
 
         // Property: replaced count matches the number of valid selectors
         expect(result.replaced).toBe(count);
@@ -442,13 +476,7 @@ describe('replacePlaceholders — property-based tests', () => {
     );
   });
 
-  it('Property 7b: structure preservation with color-block divs', () => {
-    const colorArb = fc.tuple(
-      fc.integer({ min: 0, max: 255 }),
-      fc.integer({ min: 0, max: 255 }),
-      fc.integer({ min: 0, max: 255 })
-    );
-
+  it('Property 7b: color-block divs gain a framed img child', () => {
     const htmlWithColorBlocksArb = fc.tuple(
       fc.array(
         fc.record({
@@ -491,21 +519,22 @@ describe('replacePlaceholders — property-based tests', () => {
         // Property: replaced + failed === results.size
         expect(result.replaced + result.failed).toBe(results.size);
 
-        // Property: element count is preserved
+        // Property: each color block gains one img child (+1 element)
         const originalCount = countElements(html);
         const resultCount = countElements(result.html);
-        expect(resultCount).toBe(originalCount);
+        expect(resultCount).toBe(originalCount + result.replaced);
 
-        // Property: nesting structure is preserved
-        const originalStructure = getStructure(html);
-        const resultStructure = getStructure(result.html);
-        expect(resultStructure).toBe(originalStructure);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(result.html, 'text/html');
+        expect(doc.querySelectorAll('img.renoir-framed-img').length).toBe(result.replaced);
+        expect(result.replaced).toBe(specs.length);
+        expect(result.failed).toBe(missingCount);
       }),
       { numRuns: 100 }
     );
   });
 
-  it('Property 7c: structure preservation with mixed element types', () => {
+  it('Property 7c: mixed element types gain frames without losing count integrity', () => {
     const mixedHtmlArb = fc.tuple(
       fc.integer({ min: 1, max: 3 }), // img count
       fc.integer({ min: 1, max: 3 }), // color-block count
@@ -549,15 +578,16 @@ describe('replacePlaceholders — property-based tests', () => {
         // Property: replaced + failed === results.size
         expect(result.replaced + result.failed).toBe(results.size);
 
-        // Property: element count is preserved
+        // Property: imgs add a figure wrapper; color blocks add an img child
         const originalCount = countElements(html);
         const resultCount = countElements(result.html);
-        expect(resultCount).toBe(originalCount);
+        expect(resultCount).toBe(originalCount + result.replaced);
 
-        // Property: nesting structure is preserved
-        const originalStructure = getStructure(html);
-        const resultStructure = getStructure(result.html);
-        expect(resultStructure).toBe(originalStructure);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(result.html, 'text/html');
+        expect(doc.querySelectorAll('img.renoir-framed-img').length).toBe(result.replaced);
+        expect(result.replaced).toBe(imgCount + divCount);
+        expect(result.failed).toBe(missingCount);
       }),
       { numRuns: 100 }
     );

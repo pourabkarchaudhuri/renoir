@@ -10,6 +10,7 @@ import { processArtifactImages } from '@/lib/image-pipeline';
 import { enrichProductDeckHtml } from '@/lib/product-deck-content';
 import { planImagePostProcess, setArtifactImageListener } from '@/lib/image-post-process';
 import { repairArtifactIfNeeded } from '@/lib/artifact-repair';
+import { isRevisionTurn, withLatestArtifact } from '@/lib/artifact-revision';
 import { generationBudgetForSkill, FAST_PATH_SKILL_IDS } from '@shared/generation-budgets';
 import { applySession, findSkillForConversation, getSkillSession, patchSkillSession, previewHtmlForSkill } from '@/lib/skill-sessions';
 import { buildPreviewGenerationProgress } from '@/lib/preview-generation-progress';
@@ -48,6 +49,9 @@ export function Studio() {
   const [autoContinue, setAutoContinue] = useState<AutoContinueState>(createInitialAutoState);
   const autoContinueRef = useRef(autoContinue);
   autoContinueRef.current = autoContinue;
+  /** True while a post-creation revision is in flight — keep showing the prior artifact. */
+  const isRevisingRef = useRef(false);
+  const [isRevising, setIsRevising] = useState(false);
   // Track the buffer snapshot before a continuation so we can detect overlap
   const bufferBeforeContinueRef = useRef<string>('');
   // Image generation progress state
@@ -113,6 +117,8 @@ export function Studio() {
           }
         } else {
           setAutoContinue((s) => ({ ...s, isAutoContinuing: false }));
+          isRevisingRef.current = false;
+          setIsRevising(false);
           void finishStream().then(() => {
             const after = useStudio.getState();
             if (!after.project) return;
@@ -145,6 +151,8 @@ export function Studio() {
       } else if (e.type === 'error') {
         toast(e.message, 'err');
         setAutoContinue((s) => ({ ...s, isAutoContinuing: false }));
+        isRevisingRef.current = false;
+        setIsRevising(false);
         void finishStream();
       }
     });
@@ -276,8 +284,21 @@ export function Studio() {
     let working = useStudio.getState().project;
     if (!working) return;
 
+    const sess = skill?.id ? getSkillSession(working, skill.id) : null;
+    const latestPreview = skill?.id ? previewHtmlForSkill(working, skill.id) : undefined;
+    const revisionTurn = isRevisionTurn({
+      conversation: working.conversation,
+      previewHtml: latestPreview ?? sess?.previewHtml,
+      versions: sess?.versions ?? working.versions,
+      activeVersionId: sess?.activeVersionId ?? working.activeVersionId,
+      isAutoContinue: isContinuation,
+    });
+    isRevisingRef.current = revisionTurn;
+    setIsRevising(revisionTurn);
+
     // Drop any cached template preview so the pane waits for the LLM artifact.
-    if (!isContinuation && skill?.id) {
+    // Revision turns keep the living document on screen until the new version lands.
+    if (!isContinuation && !revisionTurn && skill?.id) {
       const cleared = patchSkillSession(working, skill.id, { previewHtml: undefined });
       useStudio.getState().setProject(cleared);
       working = useStudio.getState().project ?? cleared;
@@ -306,22 +327,30 @@ export function Studio() {
       direction,
       answers: { ...briefAnswers, ...answers },
       brand,
+      revision: revisionTurn,
     });
 
+    const keepLastArtifact = isContinuation || revisionTurn;
+    const sourceHtml = revisionTurn
+      ? (skill?.id ? previewHtmlForSkill(working, skill.id) : latestPreview)
+      : undefined;
+
     if (selectedAgentId && selectedAgentId !== 'byok') {
-      const llmConversation = conversationForLlm(working.conversation, { keepLastArtifact: isContinuation });
+      let llmConversation = conversationForLlm(working.conversation, { keepLastArtifact });
+      if (revisionTurn) llmConversation = withLatestArtifact(llmConversation, sourceHtml);
       const flat = [composed.system, ...llmConversation.map((m) => `${m.role.toUpperCase()}: ${m.content}`)].join('\n\n');
       const res = await window.renoir.invokeAgent({ agentId: selectedAgentId, conversationId: id, prompt: flat });
       if (!res.ok) {
         toast(res.error || 'Could not invoke agent', 'err');
+        isRevisingRef.current = false;
+        setIsRevising(false);
         void finishStream();
       }
       return;
     }
 
-    const llmConversation = conversationForLlm(working.conversation, {
-      keepLastArtifact: isContinuation,
-    });
+    let llmConversation = conversationForLlm(working.conversation, { keepLastArtifact });
+    if (revisionTurn) llmConversation = withLatestArtifact(llmConversation, sourceHtml);
     const messages: { role: 'system' | 'user' | 'assistant'; content: string; attachments?: any[] }[] = [
       { role: 'system', content: composed.system },
       ...llmConversation.map((m) => ({
@@ -337,12 +366,16 @@ export function Studio() {
     });
     if (!res.ok) {
       toast(res.error || 'Could not start chat', 'err');
+      isRevisingRef.current = false;
+      setIsRevising(false);
       void finishStream();
     }
   };
 
   const cancel = async () => {
     setAutoContinue((s) => ({ ...s, isAutoContinuing: false, enabled: false }));
+    isRevisingRef.current = false;
+    setIsRevising(false);
     if (conversationIdRef.current) {
       if (selectedAgentId && selectedAgentId !== 'byok') {
         await window.renoir.cancelAgent(conversationIdRef.current);
@@ -375,12 +408,15 @@ export function Studio() {
   const lastUserIdx = project?.conversation.findLastIndex((m) => m.role === 'user') ?? -1;
   const lastAssistantIdx = project?.conversation.findLastIndex((m) => m.role === 'assistant') ?? -1;
   const awaitingNewArtifact = Boolean(project && lastUserIdx > lastAssistantIdx);
+  // During revision, keep the living document until the new complete artifact streams in.
+  const holdRevisionPreview = isRevising && awaitingNewArtifact && !liveExtracted?.complete;
 
   const completeArtifactHtml = useMemo(() => {
     if (liveExtracted?.complete) return liveExtracted.html;
 
     // Post-processed HTML (generated images, lint fixes) wins over the raw conversation artifact.
-    if (!awaitingNewArtifact) {
+    // Also keep it during revision turns so the preview never blanks.
+    if (!awaitingNewArtifact || holdRevisionPreview) {
       const processedHtml = previewHtmlForSkill(project!, selectedSkillId);
       if (processedHtml) return processedHtml;
     }
@@ -390,13 +426,13 @@ export function Studio() {
       : null;
     if (assistantComplete?.complete) return assistantComplete.html;
 
-    if (activeVersion?.html && !awaitingNewArtifact) return activeVersion.html;
+    if (activeVersion?.html && (!awaitingNewArtifact || holdRevisionPreview)) return activeVersion.html;
 
-    // While waiting for a new LLM artifact, never resurface a cached template.
-    if (awaitingNewArtifact) return null;
+    // While waiting for a brand-new LLM artifact, never resurface a cached template.
+    if (awaitingNewArtifact && !holdRevisionPreview) return null;
 
     return null;
-  }, [activeVersion, liveExtracted, isStreaming, lastAssistant, project, selectedSkillId, awaitingNewArtifact]);
+  }, [activeVersion, liveExtracted, isStreaming, lastAssistant, project, selectedSkillId, awaitingNewArtifact, holdRevisionPreview]);
 
   const previewArtifact = completeArtifactHtml;
   const artifactHtml = previewArtifact;
@@ -520,7 +556,7 @@ export function Studio() {
       )}
       <StudioLayout
         chat={<ChatPane onSend={(content, attachments) => sendUserMessage(content, { attachments })} onCancel={cancel} onRegenerate={regenerateFrom} onReloadPreview={() => window.dispatchEvent(new CustomEvent('renoir:reload-preview'))} hasPreview={Boolean(artifactHtml)} questionForm={questionForm} autoContinue={autoContinue} onCancelAutoContinue={cancelAutoContinue} />}
-        preview={<PreviewPane key={selectedSkillId ?? 'default'} artifact={artifactHtml} loading={showPreviewLoading} loadingPhase={generationPhase} loadingProgress={generationProgress} streaming={isStreaming && !!liveExtracted && !liveExtracted.complete} imageGenProgress={imageGenProgress} artifactResetKey={artifactResetKey} />}
+        preview={<PreviewPane key={selectedSkillId ?? 'default'} artifact={artifactHtml} loading={showPreviewLoading} loadingPhase={generationPhase} loadingProgress={generationProgress} streaming={isStreaming && !!liveExtracted && !liveExtracted.complete} imageGenProgress={imageGenProgress} artifactResetKey={artifactResetKey} revising={isRevising || (isStreaming && Boolean(previewArtifact) && awaitingNewArtifact)} />}
       />
     </div>
   );

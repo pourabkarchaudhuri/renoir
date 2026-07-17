@@ -18,6 +18,8 @@ interface DevicePreviewFrameProps {
   constrainToViewport?: boolean;
   /** Disable iframe scrolling (deck present mode). */
   lockScroll?: boolean;
+  /** Smooth opacity transition for revision updates. */
+  crossfade?: boolean;
   className?: string;
 }
 
@@ -50,6 +52,7 @@ export function DevicePreviewFrame({
   visible,
   constrainToViewport = false,
   lockScroll = false,
+  crossfade = false,
   className,
 }: DevicePreviewFrameProps) {
   const { w: deviceW, h: deviceH } = frameDimensions(surface, mode);
@@ -101,7 +104,6 @@ export function DevicePreviewFrame({
     return () => timers.forEach((t) => window.clearTimeout(t));
   }, [deviceW, mode]);
 
-  // Full chart reload when this device becomes visible.
   useEffect(() => {
     if (!visible) return;
     return scheduleSync(iframeRef.current?.contentWindow ?? null, true);
@@ -153,6 +155,7 @@ export function DevicePreviewFrame({
               border: 0,
               display: 'block',
               overflow: lockScroll || mode === 'present' ? 'hidden' : 'auto',
+              transition: crossfade ? 'opacity 240ms ease-out' : undefined,
             }}
           />
         </div>

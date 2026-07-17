@@ -43,6 +43,7 @@ export function PreviewPane({
   streaming = false,
   imageGenProgress = null,
   artifactResetKey,
+  revising = false,
 }: {
   artifact: string | null;
   loading?: boolean;
@@ -52,6 +53,8 @@ export function PreviewPane({
   imageGenProgress?: { done: number; total: number } | null;
   /** Changes when a new generation or version is selected — resets slide index for deck skills. */
   artifactResetKey?: string;
+  /** Post-creation revision in flight — preserve slide position and crossfade updates. */
+  revising?: boolean;
 }) {
   const surface = useUI((s) => s.previewSurface);
   const setPreviewSurface = useUI((s) => s.setPreviewSurface);
@@ -274,12 +277,14 @@ export function PreviewPane({
   const resetKeyRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!desktopOnly || !artifact || !artifactResetKey) return;
+    // Keep deck slide position during living-document revisions.
+    if (revising) return;
     if (resetKeyRef.current === artifactResetKey) return;
     resetKeyRef.current = artifactResetKey;
     setNavState((n) => ({ idx: 0, total: n.total }));
     const t = window.setTimeout(() => postNavToDesktop(0), 150);
     return () => window.clearTimeout(t);
-  }, [artifactResetKey, artifact, desktopOnly, postNavToDesktop]);
+  }, [artifactResetKey, artifact, desktopOnly, postNavToDesktop, revising]);
 
   // Apply mode + viewport to every preview; charts only on the active device.
   useEffect(() => {
@@ -748,6 +753,7 @@ export function PreviewPane({
                     visible={desktopOnly || surface === id}
                     constrainToViewport={skillId === 'dashboard'}
                     lockScroll={desktopOnly}
+                    crossfade={revising}
                   />
                 ))}
               </div>
