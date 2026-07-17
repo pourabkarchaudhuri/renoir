@@ -62,14 +62,15 @@ export const NAV_BRIDGE = `<!--renoir-nav-bridge-->
     document.head.appendChild(st);
   }
   function slides() {
+    var slideSel = 'section, [data-slide], .slide';
     var main = document.querySelector('main');
     if (main) {
-      var direct = main.querySelectorAll(':scope > section, :scope > [data-slide]');
+      var direct = main.querySelectorAll(':scope > section, :scope > [data-slide], :scope > .slide');
       if (direct.length) return Array.from(direct);
     }
-    var top = document.body.querySelectorAll(':scope > section, :scope > [data-slide]');
+    var top = document.body.querySelectorAll(':scope > section, :scope > [data-slide], :scope > .slide');
     if (top.length) return Array.from(top);
-    var all = document.querySelectorAll('section, [data-slide]');
+    var all = document.querySelectorAll(slideSel);
     return all.length ? Array.from(all) : [document.body];
   }
   function ensureStyle() {
@@ -192,7 +193,7 @@ export const NAV_BRIDGE = `<!--renoir-nav-bridge-->
       var root = slide.querySelector(':scope > [data-renoir-fit-root]');
       if (root) resetFitRoot(root);
     });
-    var active = document.querySelector('section[data-renoir-active], [data-slide][data-renoir-active]');
+    var active = document.querySelector('section[data-renoir-active], [data-slide][data-renoir-active], .slide[data-renoir-active]');
     if (active && active !== document.body) fitSlide(active);
   }
   function scheduleFit() {
@@ -225,7 +226,8 @@ export const NAV_BRIDGE = `<!--renoir-nav-bridge-->
         'max-height:min(40vh,280px)!important;overflow-y:auto!important;' +
         'box-sizing:border-box!important;-webkit-overflow-scrolling:touch;}' +
       'body[data-renoir-mode="present"] section,' +
-      'body[data-renoir-mode="present"] [data-slide]{' +
+      'body[data-renoir-mode="present"] [data-slide],' +
+      'body[data-renoir-mode="present"] .slide{' +
         'position:absolute!important;top:0!important;left:0!important;' +
         'width:100%!important;height:100%!important;margin:0!important;' +
         'padding-top:var(--renoir-chrome-top,72px)!important;' +
@@ -239,9 +241,11 @@ export const NAV_BRIDGE = `<!--renoir-nav-bridge-->
         'width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;flex-shrink:0!important;' +
       '}' +
       'body[data-renoir-mode="present"] section *,' +
-      'body[data-renoir-mode="present"] [data-slide] *{max-width:100%;box-sizing:border-box;}' +
+      'body[data-renoir-mode="present"] [data-slide] *,' +
+      'body[data-renoir-mode="present"] .slide *{max-width:100%;box-sizing:border-box;}' +
       'body[data-renoir-mode="present"] section table,' +
-      'body[data-renoir-mode="present"] [data-slide] table{display:block;overflow-x:auto;max-width:100%;}' +
+      'body[data-renoir-mode="present"] [data-slide] table,' +
+      'body[data-renoir-mode="present"] .slide table{display:block;overflow-x:auto;max-width:100%;}' +
       'body[data-renoir-mode="present"] [data-renoir-fit-root] h1,' +
       'body[data-renoir-mode="present"] [data-renoir-fit-root] h2{' +
         'font-size:clamp(1.15rem,4.5vw,2.25rem)!important;line-height:1.15!important;}' +
@@ -321,7 +325,7 @@ export const NAV_BRIDGE = `<!--renoir-nav-bridge-->
     if (header) fromSections += Math.max(header.offsetHeight || 0, header.scrollHeight || 0);
     if (main) {
       var sectionSum = 0;
-      main.querySelectorAll(':scope > section, :scope > [data-slide]').forEach(function (sec) {
+      main.querySelectorAll(':scope > section, :scope > [data-slide], :scope > .slide').forEach(function (sec) {
         sectionSum += Math.max(sec.offsetHeight || 0, sec.scrollHeight || 0);
       });
       if (sectionSum > 0) fromSections += sectionSum;
@@ -366,7 +370,8 @@ export const NAV_BRIDGE = `<!--renoir-nav-bridge-->
       shell +
       'main,#content,.page,.site-content{overflow:visible!important;height:auto!important;max-height:none!important;display:block!important;position:relative!important;}' +
       'body[data-renoir-mode="scroll"] section,' +
-      'body[data-renoir-mode="scroll"] [data-slide]{' +
+      'body[data-renoir-mode="scroll"] [data-slide],' +
+      'body[data-renoir-mode="scroll"] .slide{' +
         'position:relative!important;inset:auto!important;transform:none!important;' +
         'width:100%!important;height:auto!important;min-height:unset!important;max-height:none!important;' +
         'overflow:visible!important;opacity:1!important;visibility:visible!important;' +
@@ -384,7 +389,7 @@ export const NAV_BRIDGE = `<!--renoir-nav-bridge-->
       delete el.dataset.renoirFooterFixed;
       delete el.dataset.renoirChrome;
     });
-    document.querySelectorAll('section, [data-slide], main').forEach(function (el) {
+    document.querySelectorAll('section, [data-slide], .slide, main').forEach(function (el) {
       if (el === document.body) return;
       ['position','top','left','right','bottom','width','height','minHeight','maxHeight',
         'transform','transition','overflow','paddingTop','paddingBottom','zoom'

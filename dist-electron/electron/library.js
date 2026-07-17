@@ -88,7 +88,7 @@ const skills = [
     {
         id: 'pitch-deck', name: 'Pitch Deck', category: 'deck', emoji: '🎤',
         blurb: '10-slide investor deck.',
-        primer: '10 full-viewport slides: title, problem, insight, solution, demo, market, traction, business, team, ask. Slide footer: deck title · slide N. Display typography with tight tracking for slide headings. Gradient orbs as decorative backgrounds on title and ask slides. Entrance animation on each slide (fade 400ms). Realistic metrics: "$2.4M ARR", "340% YoY growth". Dark/light theme tokens.',
+        primer: '10 slides in <main> as <section data-slide="N"> (100vh each): cover, problem, solution, market, product, business model, GTM, competition, financials, ask. Footer: title · slide N/10. VC gradient orbs on cover + ask. Tight display type. Realistic metrics ("$2.4M ARR", "340% YoY"). Fade-in 400ms. Dark/light tokens.',
         questions: [
             { id: 'company', label: 'Company name', type: 'text' },
             { id: 'sector', label: 'Sector / one-liner', type: 'text' },
@@ -105,7 +105,7 @@ const skills = [
     {
         id: 'all-hands-deck', name: 'All-hands Deck', category: 'deck', emoji: '🗣️',
         blurb: 'Internal update deck — wins, asks, plan.',
-        primer: '8 slides: cover, last-quarter wins, metrics, what hurt, what we learned, plan next quarter, asks, q&a. Display typography for slide headings. Gradient background on cover. Entrance animation on metric reveals (staggered count-up). Elevation-1 on metric cards. Realistic team metrics and dates — "Q1 2024", "$1.2M closed". Dark/light theme tokens.',
+        primer: '10 slides in <main> as <section data-slide="N"> (100vh): title, exec summary, wins, KPIs, team, product, risks, priorities, roadmap, Q&A. Internal all-hands tone. Metric cards elevation-1. Cover gradient. Realistic dates ("Q1 2026"). Fade-in 400ms. Dark/light tokens.',
         questions: Q_BASE,
     },
     {

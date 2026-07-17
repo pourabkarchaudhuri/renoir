@@ -264,7 +264,21 @@ Background patterns:
 
 /** Skills that skip the turn-1 question form and generate the artifact immediately. */
 export function usesDirectArtifactGeneration(skill?: { id?: string } | null): boolean {
-  return skill?.id === 'pricing-page' || skill?.id === 'web-prototype';
+  return skill?.id === 'pricing-page' || skill?.id === 'web-prototype' || skill?.id === 'pitch-deck' || skill?.id === 'all-hands-deck';
+}
+
+/** Follow-up when a direct-generate skill wrongly emits a question form. */
+export function directGenerateKickMessage(skillId?: string): string {
+  if (skillId === 'pricing-page') {
+    return 'Skip the question form. Generate the full pricing page artifact now. Use Free / Standard / Premium defaults with domain-appropriate copy for anything missing.';
+  }
+  if (skillId === 'pitch-deck') {
+    return 'Skip the question form. Generate the complete 10-slide investor pitch deck artifact now. Use sensible defaults for company name, sector, stage, traction, and funding ask if missing.';
+  }
+  if (skillId === 'all-hands-deck') {
+    return 'Skip the question form. Generate the complete 10-slide internal all-hands deck artifact now. Use sensible defaults for company name, quarter, team wins, KPIs, and roadmap if missing.';
+  }
+  return 'Skip the question form. Generate the full artifact now using sensible defaults for anything missing in the brief.';
 }
 
 const DIRECT_ARTIFACT_OVERRIDE = `## Turn 1 (overrides FRAME rule 6)
@@ -372,6 +386,108 @@ If \`tiers\` or \`product\` appears in brief answers with custom values, **repla
 - Toggle animates price labels. Table scrolls horizontally on narrow screens if needed.
 - Self-check: Does this look like a premium pricing page you'd ship? If not, enrich copy and comparison rows until yes.`;
 
+/** Overrides conflicting FRAME guidance when generating an investor pitch deck. */
+const PITCH_DECK_QUALITY = `# Pitch deck quality bar (overrides conflicting rules above)
+
+This is a client deliverable — a polished, **10-slide investor pitch deck** (not a landing page or doc). Apply these rules even if they contradict earlier sections:
+
+${DIRECT_ARTIFACT_OVERRIDE}
+- When company name, sector, stage, traction, or ask are unspecified, invent plausible startup defaults from the brief (e.g. "Arcline", seed stage, "$2.4M ARR", "$3M seed ask").
+
+## Stack
+- Do NOT use Tailwind CDN. One <style> block + CSS custom properties only.
+- Map injected design tokens to :root: --bg, --surface, --fg, --muted, --accent, --accent2. Derive --grad: linear-gradient(135deg, var(--accent), var(--accent2)).
+- Import 1–2 Google Fonts (display + sans). VC aesthetic: white/light bg OR dark ink bg with blue→purple gradient accents — match the active design system.
+- Body may use class="tpl-pitch-deck" for scoped deck styles.
+
+## Slide markup (required for Renoir present-mode preview)
+- Wrap all slides in <main>.
+- Output **exactly 10 slides** as direct children of <main>:
+  \`<section data-slide="1" aria-label="Cover">…</section>\` through \`data-slide="10"\`.
+- Each slide: \`min-height: 100vh; width: 100%; box-sizing: border-box; padding: 72px 96px;\` (scale padding down at ≤820px).
+- Do NOT rely on JS slide navigation inside the artifact — Renoir's preview bridge handles horizontal slide nav.
+- Optional per-slide footer: \`<footer class="deck-footer">[Company] · Slide N/10</footer>\` inside each section.
+
+## Required slides (in this order — one section each)
+1. **Cover** — company name, one-line pitch, founder/round tagline, decorative gradient orb.
+2. **Problem** — big question or pain headline + 2–3 bullets with real-world stakes.
+3. **Solution** — product name + how it solves the problem; hero visual (inline SVG or CSS diagram).
+4. **Market Opportunity** — TAM/SAM/SOM or market size with 2–3 metric callouts.
+5. **Product Overview** — screenshot-style mockup (CSS/SVG), 3–4 feature bullets.
+6. **Business Model** — pricing tiers, unit economics, or revenue streams (concrete $ figures).
+7. **Go-To-Market Strategy** — channels, ICP, funnel or timeline (3–4 steps).
+8. **Competition** — 2×2 positioning matrix or comparison table vs 3 named competitors.
+9. **Financials / Metrics** — traction chart (CSS bars), ARR/MRR, growth %, retention — realistic numbers.
+10. **Ask / Closing** — funding amount, use-of-funds breakdown (3 buckets), contact / next step; gradient hero treatment.
+
+## Layout & polish
+- Display headings: tight tracking, 48–72px on slide titles. Body 18–20px, max-width ~48ch for prose blocks.
+- Use CSS Grid/Flex for metric rows, comparison tables, and team cards — no overflow on 1280×800 desktop preview.
+- Gradient orbs (300–500px, blur 80px, low opacity) on slides 1 and 10 only.
+- Entrance: @keyframes fadeIn 400ms ease-out on slide content; respect prefers-reduced-motion.
+- Realistic copy — no lorem ipsum, no "Feature One", no John Doe. Plausible startup metrics.
+
+## Banned (P0)
+- Fewer or more than 10 slides. Single-page scrolling landing layout.
+- Slides as plain <div> without <section data-slide="N">.
+- Tailwind CDN, emoji icons, stock photo URLs, invented Fortune-500 logos.
+- Question forms or "let me know if you'd like changes".
+
+## Self-check
+- Count <section data-slide> elements — must be exactly 10.
+- Would you present this deck to investors? If not, enrich metrics, competition, and ask slide until yes.`;
+
+/** Overrides conflicting FRAME guidance when generating an internal all-hands deck. */
+const ALL_HANDS_DECK_QUALITY = `# All-hands deck quality bar (overrides conflicting rules above)
+
+This is an **internal company update presentation** for employees — transparent, celebratory where earned, honest about risks. Not an investor pitch or landing page. Apply these rules even if they contradict earlier sections:
+
+${DIRECT_ARTIFACT_OVERRIDE}
+- When company name, quarter, or metrics are unspecified, infer plausible defaults from the brief (e.g. "Meridian", "Q1 2026", "NPS 72", "12 new hires").
+
+## Stack
+- Do NOT use Tailwind CDN. One <style> block + CSS custom properties only.
+- Map injected design tokens to :root: --bg, --surface, --fg, --muted, --accent, --accent2.
+- Import 1–2 Google Fonts (display + sans). Professional internal tone — match the active design system; warm but not salesy.
+- Body may use class="tpl-all-hands" for scoped deck styles.
+
+## Slide markup (required for Renoir present-mode preview)
+- Wrap all slides in <main>.
+- Output **exactly 10 slides** as direct children of <main>:
+  \`<section data-slide="1" aria-label="Title">…</section>\` through \`data-slide="10"\`.
+- Each slide: \`min-height: 100vh; width: 100%; box-sizing: border-box; padding: 72px 96px;\` (scale padding down at ≤820px).
+- Do NOT rely on JS slide navigation inside the artifact — Renoir's preview bridge handles horizontal slide nav.
+- Optional per-slide footer: \`<footer class="deck-footer">[Company] All-hands · Slide N/10</footer>\` inside each section.
+
+## Required slides (in this order — one section each)
+1. **Title Slide** — company name, "All-hands · [Month Year]" or quarter label, optional tagline.
+2. **Executive Summary** — 3–4 bullet highlights of the period (wins + focus areas).
+3. **Wins & Achievements** — 4–6 concrete wins with owners or teams named; celebrate shipped work.
+4. **KPI / Metrics Review** — 3–5 metric cards (revenue, users, NPS, retention, etc.) with trend arrows; realistic numbers.
+5. **Team Updates** — hiring, org changes, shout-outs; diverse names, specific roles.
+6. **Product Progress** — shipped features, milestones, demo mockup (CSS/SVG); timeline or checklist.
+7. **Risks & Challenges** — honest blockers, misses, or headwinds; 3–4 items with mitigation notes.
+8. **Upcoming Priorities** — top 3–5 focus areas for next quarter with owners.
+9. **Roadmap** — quarterly timeline (Q1–Q4) or milestone swimlane with 4–6 items.
+10. **Closing / Q&A** — thank-you, Slack/email for questions, next all-hands date; optional "Ask us anything" CTA.
+
+## Layout & polish
+- Display headings: 44–64px slide titles. Body 18–20px. Metric cards: elevation-1, radius-lg, accent only on key numbers.
+- CSS Grid for metric rows and roadmap timeline — no overflow on 1280×800 desktop preview.
+- Subtle gradient or branded band on title slide only; keep other slides clean and readable.
+- Staggered fade-in on metric cards (80ms delay); respect prefers-reduced-motion.
+- Realistic internal copy — no lorem ipsum, no "Team Member A", no fake Fortune-500 references.
+
+## Banned (P0)
+- Fewer or more than 10 slides. Investor pitch framing (TAM, funding ask, VC gradients).
+- Slides as plain <div> without <section data-slide="N">.
+- Tailwind CDN, emoji icons, stock photo URLs.
+- Question forms or "let me know if you'd like changes".
+
+## Self-check
+- Count <section data-slide> elements — must be exactly 10.
+- Would leadership present this to the whole company? If not, enrich KPIs, risks, and roadmap until yes.`;
+
 export function composeSystemPrompt(opts: {
   skill?: SkillSummary;
   primer?: string;
@@ -440,6 +556,12 @@ export function composeSystemPrompt(opts: {
   if (opts.skill?.id === 'pricing-page') {
     lines.push('');
     lines.push(PRICING_PAGE_QUALITY);
+  } else if (opts.skill?.id === 'pitch-deck') {
+    lines.push('');
+    lines.push(PITCH_DECK_QUALITY);
+  } else if (opts.skill?.id === 'all-hands-deck') {
+    lines.push('');
+    lines.push(ALL_HANDS_DECK_QUALITY);
   } else if (opts.skill?.category === 'web') {
     lines.push('');
     lines.push(WEB_PROTOTYPE_QUALITY);
@@ -488,7 +610,27 @@ export function inferPhase(text: string, elapsedMs: number): string {
   const open = text.match(/<artifact>([\s\S]*)$/i);
   if (open) {
     const tail = open[1].slice(-600).toLowerCase();
-    if (/<\/?footer/.test(tail))                  return 'Closing the footer…';
+    if (/deck-footer/i.test(tail))                          return 'Closing the deck…';
+    if (/<\/?footer/.test(tail))                           return 'Closing the footer…';
+    if (/ask-box|funding|use of funds/i.test(tail))                      return 'Writing the ask slide…';
+    if (/data-slide="10"|q&a|ask us anything/i.test(tail))            return 'Closing with Q&A…';
+    if (/roadmap|timeline|milestone|q[1-4]/i.test(tail))              return 'Building the roadmap…';
+    if (/priorit|focus area|next quarter/i.test(tail))                return 'Setting priorities…';
+    if (/risk|challenge|blocker|headwind/i.test(tail))                 return 'Surfacing risks…';
+    if (/wins|achievement/i.test(tail))                                return 'Celebrating wins…';
+    if (/product progress|release|demo/i.test(tail))                     return 'Highlighting product progress…';
+    if (/team update|hiring|shout-out|new hire/i.test(tail))           return 'Sharing team updates…';
+    if (/kpi|metrics review|nps|retention/i.test(tail))                return 'Reviewing KPIs…';
+    if (/executive summary|highlights/i.test(tail))                    return 'Writing executive summary…';
+    if (/data-slide="[89]"|financial|traction|metric|arr|mrr/i.test(tail)) return 'Building financials…';
+    if (/compet|positioning|matrix/i.test(tail))               return 'Mapping competition…';
+    if (/go-to-market|gtm|channel/i.test(tail))                 return 'Planning GTM…';
+    if (/business model|pricing|revenue/i.test(tail))           return 'Outlining business model…';
+    if (/data-slide="[45]"|product|feature|demo/i.test(tail))   return 'Showcasing the product…';
+    if (/market|tam|sam|som/i.test(tail))                       return 'Sizing the market…';
+    if (/data-slide="[23]"|problem|solution/i.test(tail))       return 'Framing problem & solution…';
+    if (/data-slide="1"|cover|hero/i.test(tail))                return 'Designing the cover slide…';
+    if (/<section[^>]*data-slide/i.test(tail))                   return 'Building slides…';
     if (/pricing|plan-card|tier-card|compare|feature-row/i.test(tail)) return 'Building plan cards…';
     if (/<details|<summary|faq/i.test(tail))     return 'Writing FAQ…';
     if (/<\/?form/.test(tail))                    return 'Building forms…';

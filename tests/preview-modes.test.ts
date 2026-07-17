@@ -3,6 +3,7 @@ import {
   MERMAID_CDN,
   MERMAID_INIT_SCRIPT,
   NAV_BRIDGE,
+  defaultModeForSkill,
   hasMermaidContent,
   injectMermaidScript,
   wrapWithBridge,
@@ -157,6 +158,21 @@ describe('wrapWithBridge with mermaid injection', () => {
 });
 
 
+describe('defaultModeForSkill', () => {
+  it('uses present mode for pitch-deck', () => {
+    expect(defaultModeForSkill('pitch-deck')).toBe('present');
+  });
+
+  it('uses present mode for all-hands-deck', () => {
+    expect(defaultModeForSkill('all-hands-deck')).toBe('present');
+  });
+
+  it('defaults to scroll for unknown skills', () => {
+    expect(defaultModeForSkill('pricing-page')).toBe('scroll');
+    expect(defaultModeForSkill(undefined)).toBe('scroll');
+  });
+});
+
 describe('NAV_BRIDGE present mode CSS', () => {
   it('hides in-artifact navigation buttons in present mode', () => {
     expect(NAV_BRIDGE).toContain('.prev-btn,.next-btn,.slide-controls,.navigation{display:none!important;}');
@@ -181,6 +197,12 @@ describe('NAV_BRIDGE present mode CSS', () => {
     expect(NAV_BRIDGE).toContain('overflow:hidden!important');
     expect(NAV_BRIDGE).toContain('repeat(3,minmax(0,1fr))');
     expect(NAV_BRIDGE).toContain('@media(max-width:480px)');
+  });
+
+  it('detects .slide elements for deck templates', () => {
+    expect(NAV_BRIDGE).toContain(':scope > .slide');
+    expect(NAV_BRIDGE).toContain('.slide[data-renoir-active]');
+    expect(NAV_BRIDGE).toContain('body[data-renoir-mode="present"] .slide{');
   });
 });
 

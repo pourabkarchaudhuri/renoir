@@ -4,7 +4,7 @@ import { ChatPane } from '@/components/studio/ChatPane';
 import { PreviewPane } from '@/components/studio/PreviewPane';
 import { LeftRail } from '@/components/studio/LeftRail';
 import { Splitter } from '@/components/studio/Splitter';
-import { extractArtifact, extractQuestionForm, composeSystemPrompt, inferPhase, usesDirectArtifactGeneration } from '@/lib/prompt';
+import { extractArtifact, extractQuestionForm, composeSystemPrompt, inferPhase, usesDirectArtifactGeneration, directGenerateKickMessage } from '@/lib/prompt';
 import { processArtifactImages } from '@/lib/image-pipeline';
 import {
   shouldAutoContinue,
@@ -307,12 +307,7 @@ export function Studio() {
     };
     syncAutoContinue(nextState);
     bufferBeforeContinueRef.current = lastAssistant?.content || '';
-    void sendUserMessage(
-      skill?.id === 'pricing-page'
-        ? 'Skip the question form. Generate the full pricing page artifact now. Use Free / Standard / Premium defaults with domain-appropriate copy for anything missing.'
-        : 'Skip the question form. Generate the full artifact now using sensible defaults for anything missing in the brief.',
-      { silentContinue: true },
-    );
+    void sendUserMessage(directGenerateKickMessage(skill?.id), { silentContinue: true });
   }, [stalledOnQuestionForm, isStreaming, project, lastAssistant?.content]);
 
   // Safety net: if a turn ended with an open artifact, resume automatically.

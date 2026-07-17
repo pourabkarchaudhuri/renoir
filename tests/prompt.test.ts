@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import {
   composeSystemPrompt, extractArtifact, extractQuestionForm,
-  stripArtifact, inferPhase, usesDirectArtifactGeneration,
+  stripArtifact, inferPhase, usesDirectArtifactGeneration, directGenerateKickMessage,
 } from '../src/lib/prompt';
 import { listSkills, getSkill } from '../electron/library';
 
@@ -52,10 +52,47 @@ describe('prompt composer', () => {
     expect(r.system).not.toContain('Required sections (minimum 6');
   });
 
+  it('adds pitch deck quality bar for pitch-deck skill', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'pitch-deck', name: 'Pitch Deck', category: 'deck', emoji: '🎤', blurb: '10-slide investor deck.' },
+    });
+    expect(r.system).toContain('Pitch deck quality bar');
+    expect(r.system).toContain('Never emit <question-form>');
+    expect(r.system).toContain('data-slide="1"');
+    expect(r.system).toContain('Cover');
+    expect(r.system).toContain('Go-To-Market');
+    expect(r.system).toContain('Financials / Metrics');
+    expect(r.system).toContain('Ask / Closing');
+    expect(r.system).not.toContain('Pricing page quality bar');
+  });
+
+  it('adds all-hands deck quality bar for all-hands-deck skill', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'all-hands-deck', name: 'All-hands Deck', category: 'deck', emoji: '🗣️', blurb: 'Internal update deck.' },
+    });
+    expect(r.system).toContain('All-hands deck quality bar');
+    expect(r.system).toContain('Never emit <question-form>');
+    expect(r.system).toContain('data-slide="1"');
+    expect(r.system).toContain('Executive Summary');
+    expect(r.system).toContain('Wins & Achievements');
+    expect(r.system).toContain('Risks & Challenges');
+    expect(r.system).toContain('Closing / Q&A');
+    expect(r.system).not.toContain('Pitch deck quality bar');
+  });
+
   it('flags direct-generate skills', () => {
     expect(usesDirectArtifactGeneration({ id: 'pricing-page' })).toBe(true);
     expect(usesDirectArtifactGeneration({ id: 'web-prototype' })).toBe(true);
+    expect(usesDirectArtifactGeneration({ id: 'pitch-deck' })).toBe(true);
+    expect(usesDirectArtifactGeneration({ id: 'all-hands-deck' })).toBe(true);
     expect(usesDirectArtifactGeneration({ id: 'docs-portal' })).toBe(false);
+  });
+
+  it('returns skill-specific kick messages for direct generate', () => {
+    expect(directGenerateKickMessage('pitch-deck')).toContain('10-slide');
+    expect(directGenerateKickMessage('all-hands-deck')).toContain('all-hands');
+    expect(directGenerateKickMessage('pricing-page')).toContain('pricing page');
+    expect(directGenerateKickMessage('web-prototype')).toContain('full artifact');
   });
 
   it('includes brand spec when provided', () => {
@@ -141,6 +178,18 @@ describe('inferPhase', () => {
 
   it('detects FAQ phase', () => {
     expect(inferPhase('<artifact><details><summary>', 100)).toBe('Writing FAQ…');
+  });
+
+  it('detects pitch deck slide phases', () => {
+    expect(inferPhase('<artifact><main><section data-slide="1">', 100)).toBe('Designing the cover slide…');
+    expect(inferPhase('<artifact>...<section data-slide="9">traction arr', 100)).toBe('Building financials…');
+    expect(inferPhase('<artifact>...ask-box funding', 100)).toBe('Writing the ask slide…');
+  });
+
+  it('detects all-hands deck slide phases', () => {
+    expect(inferPhase('<artifact>...executive summary highlights', 100)).toBe('Writing executive summary…');
+    expect(inferPhase('<artifact>...wins achievement shipped', 100)).toBe('Celebrating wins…');
+    expect(inferPhase('<artifact>...data-slide="10" q&a', 100)).toBe('Closing with Q&A…');
   });
 });
 
@@ -315,6 +364,7 @@ describe('composeSystemPrompt signature stability', () => {
     const exportedKeys = Object.keys(mod).sort();
     const expectedExports = [
       'composeSystemPrompt',
+      'directGenerateKickMessage',
       'extractArtifact',
       'extractQuestionForm',
       'inferPhase',
