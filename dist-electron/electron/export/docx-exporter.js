@@ -49,26 +49,24 @@ async function imageParagraph(block, ctx) {
         return out;
     }
     const fetch = ctx.assets?.fetchImage;
-    if (fetch) {
-        const img = await fetch(block.src);
-        if (img) {
-            const type = img[0] === 0xff && img[1] === 0xd8 ? 'jpg' : 'png';
-            out.push(new Paragraph({
-                children: [
-                    new ImageRun({
-                        data: img,
-                        transformation: { width: block.widthPx ?? 400, height: Math.round((block.widthPx ?? 400) * 0.6) },
-                        type,
-                    }),
-                ],
-            }));
-        }
-        else {
-            out.push(new Paragraph({
-                children: [new TextRun({ text: `[Image: ${block.alt?.trim() || 'unavailable'}]`, italics: true, color: '808080' })],
-                alignment: AlignmentType.CENTER,
-            }));
-        }
+    const img = fetch ? await fetch(block.src) : null;
+    if (img) {
+        const type = img[0] === 0xff && img[1] === 0xd8 ? 'jpg' : 'png';
+        out.push(new Paragraph({
+            children: [
+                new ImageRun({
+                    data: img,
+                    transformation: { width: block.widthPx ?? 400, height: Math.round((block.widthPx ?? 400) * 0.6) },
+                    type,
+                }),
+            ],
+        }));
+    }
+    else {
+        out.push(new Paragraph({
+            children: [new TextRun({ text: `[Image: ${block.alt?.trim() || 'unavailable'}]`, italics: true, color: '808080' })],
+            alignment: AlignmentType.CENTER,
+        }));
     }
     if (block.caption) {
         out.push(new Paragraph({

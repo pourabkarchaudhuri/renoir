@@ -213,6 +213,15 @@ function parseImage(el: Element): ExportBlock | null {
   };
 }
 
+/** When a frame slot has been filled with a generated image, export the inner <img>. */
+function parseFilledImageFrame(el: Element): ExportBlock | null {
+  const img = el.querySelector(':scope > img') ?? el.querySelector('img');
+  if (!img) return null;
+  const block = parseImage(img);
+  if (!block || block.type !== 'image' || block.placeholder) return null;
+  return block;
+}
+
 function parseElement(el: Element, opts: HtmlParserOptions): ExportBlock[] {
   const tag = el.tagName;
 
@@ -275,6 +284,8 @@ function parseElement(el: Element, opts: HtmlParserOptions): ExportBlock[] {
 
   // Image slot divs awaiting generation (ph-img, img-slot, *placeholder*) — keep as placeholder.
   if ((tag === 'DIV' || tag === 'FIGURE' || tag === 'SECTION') && isPlaceholderElement(el)) {
+    const filled = parseFilledImageFrame(el);
+    if (filled) return [filled];
     return [{ type: 'image', src: '', alt: placeholderLabel(el), placeholder: true }];
   }
 

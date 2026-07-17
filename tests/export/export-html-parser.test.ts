@@ -86,4 +86,37 @@ describe('htmlToExportBlocks', () => {
     expect(blocks[0]).toMatchObject({ type: 'image', alt: 'Logo' });
     expect(blocks[0]?.type === 'image' && blocks[0].placeholder).toBeFalsy();
   });
+
+  it('parses filled ph-img frames as real image blocks', () => {
+    const html = '<div class="ph-img wide"><img src="renoir-asset://images/hero.png" alt="Hero visual" class="renoir-framed-img"></div>';
+    const blocks = parse(html);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      type: 'image',
+      src: 'renoir-asset://images/hero.png',
+      alt: 'Hero visual',
+    });
+    expect(blocks[0]?.type === 'image' && blocks[0].placeholder).toBeFalsy();
+  });
+
+  it('parses filled img-slot frames with inline data URLs', () => {
+    const dataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+    const html = `<div class="img-slot"><img src="${dataUrl}" alt="Dashboard screenshot"></div>`;
+    const blocks = parse(html);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      type: 'image',
+      src: dataUrl,
+      alt: 'Dashboard screenshot',
+    });
+    expect(blocks[0]?.type === 'image' && blocks[0].placeholder).toBeFalsy();
+  });
+
+  it('keeps empty ph-img frames as placeholders', () => {
+    const html = '<div class="ph-img wide">[ Hero visual · 16:9 ]</div>';
+    const blocks = parse(html);
+    expect(blocks).toEqual([
+      { type: 'image', src: '', alt: 'Hero visual', placeholder: true },
+    ]);
+  });
 });

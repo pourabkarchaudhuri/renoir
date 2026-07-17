@@ -195,6 +195,16 @@ function parseImage(el) {
         widthPx: width ? parseInt(width, 10) || undefined : undefined,
     };
 }
+/** When a frame slot has been filled with a generated image, export the inner <img>. */
+function parseFilledImageFrame(el) {
+    const img = el.querySelector(':scope > img') ?? el.querySelector('img');
+    if (!img)
+        return null;
+    const block = parseImage(img);
+    if (!block || block.type !== 'image' || block.placeholder)
+        return null;
+    return block;
+}
 function parseElement(el, opts) {
     const tag = el.tagName;
     if (SKIP_TAGS.has(tag))
@@ -249,6 +259,9 @@ function parseElement(el, opts) {
     }
     // Image slot divs awaiting generation (ph-img, img-slot, *placeholder*) — keep as placeholder.
     if ((tag === 'DIV' || tag === 'FIGURE' || tag === 'SECTION') && isPlaceholderElement(el)) {
+        const filled = parseFilledImageFrame(el);
+        if (filled)
+            return [filled];
         return [{ type: 'image', src: '', alt: placeholderLabel(el), placeholder: true }];
     }
     if (BLOCK_TAGS.has(tag) || tag === 'SPAN') {
