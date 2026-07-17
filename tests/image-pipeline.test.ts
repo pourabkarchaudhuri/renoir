@@ -96,6 +96,27 @@ describe('processArtifactImages', () => {
       expect(mockImageBatchGenerate).toHaveBeenCalledTimes(1);
     });
 
+    it('fills ph-img placeholders in a full HTML document', async () => {
+      mockImageBatchGenerate.mockImplementation(async (req) => ({
+        ok: true,
+        results: req.items.map((item: any) => ({
+          id: item.id,
+          ok: true,
+          dataUrl: SMALL_DATA_URL,
+        })),
+      }));
+
+      const html = `<!doctype html><html><head><style>.ph-img{background:linear-gradient(#eee,#ccc)}</style></head>
+<body><section><div class="ph-img wide" aria-label="Hero shot">[ Hero visual · 16:9 ]</div></section></body></html>`;
+
+      const result = await processArtifactImages(html, 'test-project');
+      expect(result.imagesGenerated).toBe(1);
+      expect(result.html).toContain('<img');
+      expect(result.html).toContain('object-fit:cover');
+      expect(result.html).not.toContain('Hero visual');
+      expect(result.html).toMatch(/<html/i);
+    });
+
     it('passes design system and direction to prompt generator', async () => {
       mockImageBatchGenerate.mockImplementation(async (req) => {
         // Verify style suffix is incorporated into prompts

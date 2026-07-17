@@ -107,6 +107,30 @@ describe('extractPlaceholders', () => {
       const result = extractPlaceholders(html);
       expect(result).toHaveLength(0);
     });
+
+    it('detects .ph-img image boxes', () => {
+      const html = '<div class="ph-img wide" aria-label="Hero visual placeholder">[ Hero visual · 16:9 ]</div>';
+      const result = extractPlaceholders(html);
+      expect(result).toHaveLength(1);
+      expect(result[0].kind).toBe('placeholder-div');
+      expect(result[0].context.labelText).toBe('Hero visual');
+      expect(result[0].sizing.aspectRatio).toBe('16 / 9');
+    });
+
+    it('detects .img-slot image boxes', () => {
+      const html = '<figure class="img-slot r-3x2" style="width:400px;height:300px"><span class="label">Product shot</span></figure>';
+      const result = extractPlaceholders(html);
+      expect(result).toHaveLength(1);
+      expect(result[0].kind).toBe('placeholder-div');
+      expect(result[0].sizing.aspectRatio).toBe('3 / 2');
+    });
+
+    it('infers default ph-img aspect ratio when no modifier class', () => {
+      const html = '<div class="ph-img" style="width:400px;height:250px">[ Illustration ]</div>';
+      const result = extractPlaceholders(html);
+      expect(result).toHaveLength(1);
+      expect(result[0].sizing.aspectRatio).toBe('16 / 10');
+    });
   });
 
   describe('svg-rect detection', () => {

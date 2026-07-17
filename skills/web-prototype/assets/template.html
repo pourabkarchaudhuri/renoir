@@ -266,10 +266,29 @@
       font-family: var(--font-mono);
       font-size: 12px;
       letter-spacing: 0.04em;
+      overflow: hidden;
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
     }
     .ph-img.square    { aspect-ratio: 1 / 1; }
     .ph-img.portrait  { aspect-ratio: 3 / 4; }
     .ph-img.wide      { aspect-ratio: 16 / 9; }
+    .ph-img > img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center center;
+      display: block;
+      border: 0;
+    }
+    .ph-img:has(> img) {
+      display: block;
+      padding: 0;
+      color: transparent;
+      background-image: none;
+    }
 
     /* ─── divider ───────────────────────────────────────────────────── */
     .rule  { border: 0; border-top: 1px solid var(--border); margin: 0; }

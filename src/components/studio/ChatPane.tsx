@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useCatalog, useStudio, useUI } from '@/lib/store';
-import { Send, Square, ImageIcon, Sparkles, Pencil, Trash2, RotateCcw, Loader2, Paperclip, X, KeyRound } from 'lucide-react';
+import { Send, Square, ImageIcon, Sparkles, Pencil, Trash2, RotateCcw, Loader2, Paperclip, X, KeyRound, Wand2 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { cn } from '@/lib/cn';
 import { QuestionForm } from './QuestionForm';
@@ -8,20 +8,25 @@ import { extractArtifact, stripArtifact, inferPhase } from '@/lib/prompt';
 import { renderMarkdown } from '@/lib/markdown';
 import { ChatMarkdown } from './ChatMarkdown';
 import type { AutoContinueState } from '@/lib/auto-continue';
-import { isAutoContinuePrompt } from '@/lib/auto-continue';
 import { readFileAsAttachment, readClipboardImage, classify, MAX_ATTACHMENTS, type Attachment, summarizeAttachments } from '@/lib/attachments';
+import { ExpandableMessage } from '@/components/chrome/ExpandableMessage';
+import { syncActiveSession } from '@/lib/skill-sessions';
+import { pickEditDraftFromHtml } from '@/lib/pick-target';
+import type { ProjectMessage } from '@/types/global';
+import { previewHtmlForSkill } from '@/lib/skill-sessions';
 
 interface Props {
   onSend: (content: string, attachments?: Attachment[]) => void;
   onCancel: () => void;
   onRegenerate: (fromIndex: number) => void;
+  onReloadPreview?: () => void;
+  hasPreview?: boolean;
   questionForm: { id: string; label: string; type: string; options?: string[] }[] | null;
-  directGenerate?: boolean;
   autoContinue?: AutoContinueState;
   onCancelAutoContinue?: () => void;
 }
 
-export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, directGenerate, autoContinue, onCancelAutoContinue }: Props) {
+export function ChatPane({ onSend, onCancel, onRegenerate, onReloadPreview, hasPreview, questionForm, autoContinue, onCancelAutoContinue }: Props) {
   const project = useStudio((s) => s.project);
   const draft = useStudio((s) => s.draft);
   const setDraft = useStudio((s) => s.setDraft);
@@ -33,23 +38,45 @@ export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, directG
     scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: 'smooth' });
   }, [project?.conversation.length, pending, questionForm]);
 
+  useEffect(() => {
+    const onPick = (e: Event) => {
+      const detail = (e as CustomEvent).detail as {
+        odId?: string;
+        tag?: string;
+        textPreview?: string;
+      };
+      if (!detail?.odId) return;
+      const st = useStudio.getState();
+      const html = st.project
+        ? previewHtmlForSkill(st.project, st.selectedSkillId)
+        : undefined;
+      setDraft(pickEditDraftFromHtml({
+        odId: detail.odId,
+        tag: detail.tag,
+        textPreview: detail.textPreview,
+      }, html));
+    };
+    window.addEventListener('renoir:pick-target', onPick);
+    return () => window.removeEventListener('renoir:pick-target', onPick);
+  }, [setDraft]);
+
   return (
     <section className="flex-1 flex flex-col min-w-0">
       <div ref={scroll} className="flex-1 overflow-y-auto scroll-thin px-8 py-6 space-y-6">
         {(!project?.conversation || project.conversation.length === 0) && (
-          <Greeting directGenerate={directGenerate} />
+          <Greeting />
         )}
 
-        {project?.conversation
-          .filter((m) => !(m.role === 'user' && isAutoContinuePrompt(m.content)))
-          .map((m, i) => (
+        {project?.conversation.map((m, i) => (
           <EditableMessage
             key={i}
             index={i}
             role={m.role}
             content={m.content}
             attachments={m.attachments}
+            hasPreview={hasPreview}
             onRegenerate={() => onRegenerate(i)}
+            onReloadPreview={onReloadPreview}
           />
         ))}
 
@@ -61,7 +88,9 @@ export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, directG
       {autoContinue?.isAutoContinuing && (
         <div className="px-8 py-2 flex items-center gap-2 text-[12px] text-primary/90 border-t border-border/50 bg-primary/5">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-          <span>Finishing your artifact… (step {autoContinue.attempts}/{autoContinue.maxAttempts})</span>
+          <span>
+            Auto-continuing… (attempt {autoContinue.attempts}/{autoContinue.maxAttempts})
+          </span>
           {onCancelAutoContinue && (
             <button
               onClick={onCancelAutoContinue}
@@ -79,12 +108,13 @@ export function ChatPane({ onSend, onCancel, onRegenerate, questionForm, directG
         onSend={(attachments) => { if (draft.trim() || attachments?.length) onSend(draft, attachments); }}
         onCancel={onCancel}
         isStreaming={isStreaming}
+        hasPreview={hasPreview}
       />
     </section>
   );
 }
 
-function Greeting({ directGenerate }: { directGenerate?: boolean }) {
+function Greeting() {
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }}
@@ -101,9 +131,8 @@ function Greeting({ directGenerate }: { directGenerate?: boolean }) {
           <div className="text-[10px] uppercase tracking-[0.32em] text-primary/80">Renoir</div>
           <h3 className="font-display italic text-2xl mt-0.5">Tell me what to render.</h3>
           <p className="text-sm text-muted-foreground mt-2 max-w-prose leading-relaxed">
-            {directGenerate
-              ? 'Send a prompt and I will return a runnable artifact. Thin briefs are fine — I will fill gaps with sensible defaults.'
-              : 'Drop a brief and I will return a runnable artifact. If the brief is thin, expect a short question form first — locking the scope keeps the output sharp.'}
+            Drop a brief and I will return a runnable artifact. If the brief is thin, expect a short
+            question form first — locking the scope keeps the output sharp.
           </p>
         </div>
       </div>
@@ -179,7 +208,13 @@ function StreamingBubble({ buffer }: { buffer: string }) {
           )}
         </div>
         {note && (
-          <div className="mt-1 text-[10.5px] text-muted-foreground/80 font-mono truncate">{note}</div>
+          <ExpandableMessage
+            text={note}
+            tone={status === 'stalled' ? 'warn' : status === 'retrying' ? 'info' : 'neutral'}
+            textClassName="mt-1 text-[10.5px] text-muted-foreground/80"
+            copyLabel="Copy"
+            expandLabel="Show details"
+          />
         )}
         {extracted && (
           <div className="mt-2 h-1 rounded-full bg-secondary overflow-hidden">
@@ -197,15 +232,18 @@ function StreamingBubble({ buffer }: { buffer: string }) {
 }
 
 function EditableMessage({
-  index, role, content, attachments, onRegenerate,
+  index, role, content, attachments, hasPreview, onRegenerate, onReloadPreview,
 }: {
   index: number;
   role: string;
   content: string;
   attachments?: any[];
+  hasPreview?: boolean;
   onRegenerate: () => void;
+  onReloadPreview?: () => void;
 }) {
   const project = useStudio((s) => s.project);
+  const selectedSkillId = useStudio((s) => s.selectedSkillId);
   const setProject = useStudio((s) => s.setProject);
   const toast = useUI((s) => s.toast);
   const [editing, setEditing] = useState(false);
@@ -217,7 +255,10 @@ function EditableMessage({
     if (draft === content) return;
     const conv = project.conversation.slice();
     conv[index] = { ...conv[index], content: draft };
-    const next = { ...project, conversation: conv };
+    const next = syncActiveSession(
+      { ...project, conversation: conv },
+      selectedSkillId ?? project.skillId,
+    );
     await window.renoir.saveProject(next);
     setProject(next);
     toast('Message updated', 'ok');
@@ -225,12 +266,32 @@ function EditableMessage({
 
   const remove = async () => {
     if (!project) return;
+    const removed: ProjectMessage = { ...project.conversation[index] };
     const conv = project.conversation.slice();
     conv.splice(index, 1);
-    const next = { ...project, conversation: conv };
+    const next = syncActiveSession(
+      { ...project, conversation: conv },
+      selectedSkillId ?? project.skillId,
+    );
     await window.renoir.saveProject(next);
     setProject(next);
-    toast('Message removed', 'info');
+
+    const undo = async () => {
+      const current = useStudio.getState().project;
+      if (!current) return;
+      const restored = current.conversation.slice();
+      let insertAt = restored.findIndex((m) => m.ts > removed.ts);
+      if (insertAt === -1) insertAt = restored.length;
+      restored.splice(insertAt, 0, removed);
+      const undone = syncActiveSession(
+        { ...current, conversation: restored },
+        useStudio.getState().selectedSkillId ?? current.skillId,
+      );
+      await window.renoir.saveProject(undone);
+      useStudio.getState().setProject(undone);
+    };
+
+    toast('Message removed', 'info', { label: 'Undo', onClick: () => { void undo(); } });
   };
 
   if (editing) {
@@ -265,10 +326,22 @@ function EditableMessage({
           <Trash2 className="h-3 w-3" />
           Delete
         </button>
-        {role === 'user' && (
-          <button onClick={onRegenerate} className="btn-ghost text-[10.5px] py-0.5">
+        {role === 'user' && hasPreview && onReloadPreview && (
+          <button onClick={onReloadPreview} className="btn-ghost text-[10.5px] py-0.5">
             <RotateCcw className="h-3 w-3" />
-            Regenerate from here
+            Reload preview
+          </button>
+        )}
+        {role === 'user' && (
+          <button
+            onClick={() => {
+              if (!window.confirm('Regenerate from this message? This will re-run the AI.')) return;
+              onRegenerate();
+            }}
+            className="btn-ghost text-[10.5px] py-0.5 text-muted-foreground"
+          >
+            <Wand2 className="h-3 w-3" />
+            Regenerate
           </button>
         )}
       </div>
@@ -345,13 +418,14 @@ function Message({ role, content, attachments, streaming }: { role: string; cont
 }
 
 function Composer({
-  value, onChange, onSend, onCancel, isStreaming,
+  value, onChange, onSend, onCancel, isStreaming, hasPreview,
 }: {
   value: string;
   onChange: (s: string) => void;
   onSend: (attachments?: Attachment[]) => void;
   onCancel: () => void;
   isStreaming: boolean;
+  hasPreview?: boolean;
 }) {
   const skills = useCatalog((s) => s.skills);
   const designSystems = useCatalog((s) => s.designSystems);
@@ -359,7 +433,7 @@ function Composer({
   const agents = useCatalog((s) => s.agents);
   const byok = useCatalog((s) => s.byok);
   const selectedAgentId = useStudio((s) => s.selectedAgentId);
-  const switchSkill = useStudio((s) => s.switchSkill);
+  const setSkill = useStudio((s) => s.setSkill);
   const setSystem = useStudio((s) => s.setSystem);
   const setDirection = useStudio((s) => s.setDirection);
   const setAgent = useStudio((s) => s.setAgent);
@@ -446,7 +520,7 @@ function Composer({
 
   const applySlash = (item: { id: string; label: string }) => {
     const cmd = hint?.cmd || '';
-    if (cmd.startsWith('skill'))     { void switchSkill(item.id); toast(`Skill → ${item.label}`, 'ok'); }
+    if (cmd.startsWith('skill'))     { setSkill(item.id);     toast(`Skill → ${item.label}`, 'ok'); }
     else if (cmd.startsWith('system'))    { setSystem(item.id);    toast(`System → ${item.label}`, 'ok'); }
     else if (cmd.startsWith('direction')) { setDirection(item.id); toast(`Direction → ${item.label}`, 'ok'); }
     else if (cmd.startsWith('agent'))     { setAgent(item.id);     toast(`Agent → ${item.label}`, 'ok'); }
@@ -564,7 +638,9 @@ function Composer({
           }}
           onDragOver={(e) => e.preventDefault()}
           rows={2}
-          placeholder="Describe the artifact, or type / for skills, systems, agents…"
+          placeholder={hasPreview
+            ? 'Ask for a change — rewrite, expand, shorten, add an image…'
+            : 'Describe the artifact, or type / for skills, systems, agents…'}
           className="flex-1 bg-transparent outline-none resize-none text-[13.5px] leading-relaxed px-2 py-1.5"
         />
         {isStreaming ? (

@@ -70,6 +70,10 @@ describe('shouldAutoContinue', () => {
       expect(shouldAutoContinue('aborted', '<div>hello', baseState)).toBe(false);
     });
 
+    it('finishReason === "aborted" with open artifact does not resume', () => {
+      expect(shouldAutoContinue('aborted', '<artifact><div>partial', baseState)).toBe(false);
+    });
+
     it('finishReason === undefined', () => {
       expect(shouldAutoContinue(undefined, '<div>hello', baseState)).toBe(false);
     });
@@ -225,9 +229,10 @@ describe('Property-Based Tests', () => {
         const condA = state.enabled === true;
         const condC = !lower.includes('</artifact>');
         const condD = state.attempts < state.maxAttempts;
+        const notCancelled = finishReason !== 'aborted' && finishReason !== 'cancelled';
         // Trigger on length OR incomplete artifact (actual tag, not just the word)
         const hasOpenTag = lower.includes('<artifact>') || lower.includes('<artifact ');
-        const condB = finishReason === 'length' || (hasOpenTag && condC);
+        const condB = notCancelled && (finishReason === 'length' || (hasOpenTag && condC));
 
         const expected = condA && condB && condC && condD;
 

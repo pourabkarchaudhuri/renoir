@@ -77,7 +77,7 @@ export function Media() {
               transition={{ duration: 0.16 }}
               className="px-6 py-5"
             >
-              {tab === 'image'      && <ImagePanel  azureReady={Boolean(azure?.configured)} projectId={project?.id} />}
+              {tab === 'image'      && <ImagePanel  azureReady={Boolean(azure?.imageConfigured ?? azure?.configured)} projectId={project?.id} />}
               {tab === 'video'      && <VideoPanel  azureReady={Boolean(azure?.videoDeployment)} projectId={project?.id} />}
               {tab === 'audio'      && <AudioPanel  azureReady={Boolean(azure?.audioDeployment || azure?.textDeployment)} projectId={project?.id} />}
               {tab === 'storyboard' && <StoryboardPanel projectId={project?.id} />}
@@ -144,7 +144,7 @@ function ImagePanel({ azureReady, projectId }: { azureReady: boolean; projectId?
   const toast = useUI((s) => s.toast);
   const [mode, setMode] = useState<'gen' | 'edit'>('gen');
   const [prompt, setPrompt] = useState('');
-  const [size, setSize] = useState<'1024x1024' | '1024x1536' | '1536x1024'>('1024x1024');
+  const [size, setSize] = useState<'1024x1024'>('1024x1024');
   const [n, setN] = useState(1);
   const [editFile, setEditFile] = useState<{ base64: string; mime: string; preview: string } | null>(null);
 
@@ -206,11 +206,9 @@ function ImagePanel({ azureReady, projectId }: { azureReady: boolean; projectId?
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Size">
-          <select value={size} onChange={(e) => setSize(e.target.value as any)} className="input-base">
-            <option value="1024x1024">Square 1024</option>
-            <option value="1024x1536">Portrait</option>
-            <option value="1536x1024">Landscape</option>
+        <Field label="Size (max 1024×1024)">
+          <select value={size} onChange={(e) => setSize(e.target.value as '1024x1024')} className="input-base">
+            <option value="1024x1024">Square 1024×1024</option>
           </select>
         </Field>
         <Field label="Count">
@@ -346,7 +344,7 @@ function StoryboardPanel({ projectId }: { projectId?: string }) {
   const toast = useUI((s) => s.toast);
   const [script, setScript] = useState('');
   const [styleSuffix, setStyleSuffix] = useState('cinematic, anamorphic 2.39:1, soft volumetric light, restrained palette');
-  const [size, setSize] = useState<'1536x1024' | '1024x1024' | '1024x1536'>('1536x1024');
+  const [size, setSize] = useState<'1024x1024'>('1024x1024');
   const shots = script.split('\n').map((l) => l.trim()).filter(Boolean);
 
   const run = () => {
@@ -379,11 +377,9 @@ function StoryboardPanel({ projectId }: { projectId?: string }) {
           className="input-base font-mono text-[12px]"
         />
       </Field>
-      <Field label="Frame size">
-        <select value={size} onChange={(e) => setSize(e.target.value as any)} className="input-base">
-          <option value="1536x1024">Landscape 1536×1024</option>
-          <option value="1024x1024">Square 1024</option>
-          <option value="1024x1536">Portrait 1024×1536</option>
+      <Field label="Frame size (max 1024×1024)">
+        <select value={size} onChange={(e) => setSize(e.target.value as '1024x1024')} className="input-base">
+          <option value="1024x1024">Square 1024×1024</option>
         </select>
       </Field>
       <div className="text-[11px] text-muted-foreground mt-3">{shots.length} shot{shots.length === 1 ? '' : 's'} queued</div>

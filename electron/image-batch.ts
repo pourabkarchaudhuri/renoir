@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { app, BrowserWindow } from 'electron';
 import { generateImage } from './image.js';
+import { clampImageSize } from '../shared/image-size.js';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -181,7 +182,7 @@ export async function batchGenerateImages(req: BatchImageRequest): Promise<Batch
   let anySuccess = false;
 
   const tasks = items.map(async (item, index) => {
-    const size = item.size ?? '1024x1024';
+    const size = clampImageSize(item.size);
     const quality = item.quality ?? 'auto';
     const promptHash = computePromptHash(item.prompt, size, quality);
 

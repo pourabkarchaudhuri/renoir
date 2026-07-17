@@ -18,6 +18,9 @@ const C = {
   chatCancel: 'renoir:chat:cancel',
   chatEvent:  'renoir:chat:event',
   chatRoute:  'renoir:chat:route',
+  marketingInstant: 'renoir:marketing:instant',
+  blogPostInstant: 'renoir:blog-post:instant',
+  changelogInstant: 'renoir:changelog:instant',
   themeSet:   'renoir:theme:set',
 
   agentsList:   'renoir:agents:list',
@@ -48,12 +51,14 @@ const C = {
   projectImport:  'renoir:projects:import',
 
   workspaceOpen:  'renoir:workspace:open',
+  workspaceGet:   'renoir:workspace:get',
   workspaceWrite: 'renoir:workspace:write',
 
   imageEdit: 'renoir:image:edit',
   critiqueStart: 'renoir:critique:start',
   exportPdf: 'renoir:export:pdf',
   exportPptx: 'renoir:export:pptx',
+  exportDocument: 'renoir:export:document',
   assetsList: 'renoir:assets:list',
 
   visionDescribe: 'renoir:vision:describe',
@@ -67,6 +72,7 @@ const C = {
   previewOpen: 'renoir:preview:open',
   previewPush: 'renoir:preview:push',
   previewIsOpen: 'renoir:preview:isOpen',
+  previewRecord: 'renoir:preview:record',
   customListDirections:   'renoir:custom:listDirections',
   customSaveDirection:    'renoir:custom:saveDirection',
   customDeleteDirection:  'renoir:custom:deleteDirection',
@@ -95,6 +101,9 @@ contextBridge.exposeInMainWorld('renoir', {
   chatStart:  (req) => ipcRenderer.invoke(C.chatStart, req),
   chatCancel: (id)  => ipcRenderer.invoke(C.chatCancel, id),
   chatRoute:  () => ipcRenderer.invoke(C.chatRoute),
+  buildMarketingSite: (brief) => ipcRenderer.invoke(C.marketingInstant, brief),
+  buildBlogPost: (brief) => ipcRenderer.invoke(C.blogPostInstant, brief),
+  buildChangelog: (brief) => ipcRenderer.invoke(C.changelogInstant, brief),
   themeSet:   (t) => ipcRenderer.invoke(C.themeSet, t),
   onChatEvent: (cb) => {
     const handler = (_e, payload) => cb(payload);
@@ -134,12 +143,14 @@ contextBridge.exposeInMainWorld('renoir', {
   importProject: ()   => ipcRenderer.invoke(C.projectImport),
 
   openWorkspace: () => ipcRenderer.invoke(C.workspaceOpen),
+  getWorkspace:  () => ipcRenderer.invoke(C.workspaceGet),
   writeArtifact: (req) => ipcRenderer.invoke(C.workspaceWrite, req),
 
   imageEdit:      (req) => ipcRenderer.invoke(C.imageEdit, req),
   critiqueStart:  (req) => ipcRenderer.invoke(C.critiqueStart, req),
   exportPdf:      (req) => ipcRenderer.invoke(C.exportPdf, req),
   exportPptx:     (req) => ipcRenderer.invoke(C.exportPptx, req),
+  exportDocument: (req) => ipcRenderer.invoke(C.exportDocument, req),
   listProjectAssets: (req) => ipcRenderer.invoke(C.assetsList, req),
 
   visionDescribe:  (req) => ipcRenderer.invoke(C.visionDescribe, req),
@@ -153,6 +164,7 @@ contextBridge.exposeInMainWorld('renoir', {
   openPreview:     (html) => ipcRenderer.invoke(C.previewOpen, html),
   pushPreview:     (html) => ipcRenderer.invoke(C.previewPush, html),
   previewIsOpen:   () => ipcRenderer.invoke(C.previewIsOpen),
+  previewRecord:   (req) => ipcRenderer.invoke(C.previewRecord, req),
   listCustomDirections:   () => ipcRenderer.invoke(C.customListDirections),
   saveCustomDirection:    (rec) => ipcRenderer.invoke(C.customSaveDirection, rec),
   deleteCustomDirection:  (id) => ipcRenderer.invoke(C.customDeleteDirection, id),
@@ -163,6 +175,13 @@ contextBridge.exposeInMainWorld('renoir', {
   listCustomSystems:   () => ipcRenderer.invoke(C.customListSystems),
   saveCustomSystem:    (rec) => ipcRenderer.invoke(C.customSaveSystem, rec),
   deleteCustomSystem:  (id) => ipcRenderer.invoke(C.customDeleteSystem, id),
+
+  onFlushRequest: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('renoir:app:flush', handler);
+    return () => ipcRenderer.removeListener('renoir:app:flush', handler);
+  },
+  flushDone: () => ipcRenderer.invoke('renoir:app:flush-done'),
 
   platform: process.platform,
 });

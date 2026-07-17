@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, protocol, net } from 'electron';
 import path from 'node:path';
+import fs from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -66,22 +67,29 @@ function adaptDiskPrimer(raw: string): string {
 import { lintArtifact, extractBrandSpec } from './lint.js';
 import { generateAudio, generateVideo } from './media.js';
 import { renderHyperFrames } from './hyperframes.js';
+import { recordPreview } from './preview-record.js';
 import { listTemplates, saveTemplate, deleteTemplate } from './templates.js';
 import { exportProject, importProject } from './projectIO.js';
 import { startCritique } from './critique.js';
 import { editImage } from './image.js';
 import { customCatalog } from './customCatalog.js';
 import { exportArtifactToPdf } from './pdf.js';
+import { exportDocumentToFile } from './export/index.js';
 import { describeImage } from './vision.js';
 import { renderStoryboard } from './storyboard.js';
 import { extractPalette } from './colors.js';
 import { ensurePreviewWindow, pushPreviewHtml, isPreviewOpen } from './preview-window.js';
 import { exportArtifactToPptx } from './pptx.js';
+import { buildMarketingSiteFromBrief } from './marketing-site.js';
+import { buildBlogPostFromBrief } from './blog-post.js';
+import { buildChangelogFromBrief } from './changelog.js';
 import { listProjectAssets } from './assets.js';
 
 let mainWindow: BrowserWindow | null = null;
+let closeConfirmed = false;
 
 function createWindow(): void {
+  closeConfirmed = false;
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -124,14 +132,27 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
+
+  mainWindow.on('close', (e) => {
+    if (closeConfirmed) return;
+    e.preventDefault();
+    mainWindow?.webContents.send('renoir:app:flush');
+  });
 }
 
 function registerIpc(): void {
+  ipcMain.handle('renoir:app:flush-done', () => {
+    closeConfirmed = true;
+    mainWindow?.close();
+    return { ok: true };
+  });
+
   // BYOK
   ipcMain.handle('renoir:byok:get', async () => {
     const cfg = store.getByok();
     const key = await secrets.getByokKey();
-    return { baseUrl: cfg.baseUrl ?? '', model: cfg.model ?? '', hasKey: Boolean(key) };
+    const keySource = await secrets.getByokKeySource();
+    return { baseUrl: cfg.baseUrl ?? '', model: cfg.model ?? '', hasKey: Boolean(key), keySource };
   });
   ipcMain.handle('renoir:byok:set', async (_e, payload: { baseUrl?: string; model?: string; apiKey?: string }) => {
     if (typeof payload?.baseUrl === 'string' || typeof payload?.model === 'string') {
@@ -156,9 +177,11 @@ function registerIpc(): void {
     const c = azureConfig();
     return {
       configured: azureConfigured(),
+      imageConfigured: azureImageConfigured(),
       imageDeployment: c.imageModel,
       textDeployment: c.textModel,
       endpoint: c.endpoint,
+      imageEndpoint: c.imageEndpoint,
       audioDeployment: process.env.AZURE_AUDIO_DEPLOYMENT || '',
       videoDeployment: process.env.AZURE_VIDEO_DEPLOYMENT || '',
     };
@@ -194,7 +217,7 @@ function registerIpc(): void {
   ipcMain.handle('renoir:design:list', () => {
     const builtIn = listDesignSystems();
     const custom = customCatalog.listSystems().map((d) => ({
-      id: d.id, name: d.name, vibe: d.vibe, swatches: d.swatches, font: d.font,
+      id: d.id, name: d.name, vibe: d.vibe, swatches: d.swatches, font: d.font, tokens: d.tokens,
     }));
     return [...builtIn, ...custom];
   });
@@ -227,6 +250,27 @@ function registerIpc(): void {
   ipcMain.handle('renoir:chat:start',  (_e, req) => startChat(req));
   ipcMain.handle('renoir:chat:cancel', (_e, id: string) => cancelChat(id));
   ipcMain.handle('renoir:chat:route',  () => describeRoute());
+  ipcMain.handle('renoir:marketing:instant', (_e, brief: { productName?: string; tagline?: string }) => {
+    try {
+      return { ok: true, html: buildMarketingSiteFromBrief(brief) };
+    } catch (err: any) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+  ipcMain.handle('renoir:blog-post:instant', (_e, brief: { companyName?: string; headline?: string }) => {
+    try {
+      return { ok: true, html: buildBlogPostFromBrief(brief) };
+    } catch (err: any) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+  ipcMain.handle('renoir:changelog:instant', (_e, brief: { productName?: string }) => {
+    try {
+      return { ok: true, html: buildChangelogFromBrief(brief) };
+    } catch (err: any) {
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
 
   // Theme — sync titlebar overlay color in real time on Windows.
   ipcMain.handle('renoir:theme:set', (_e, theme: 'dark' | 'light') => {
@@ -250,6 +294,7 @@ function registerIpc(): void {
   ipcMain.handle('renoir:image:generate', (_e, req) => generateImage(req));
   ipcMain.handle('renoir:image:edit',     (_e, req) => editImage(req));
   ipcMain.handle('renoir:image:generateBatch', async (_e, req: { items?: any[]; projectId?: string; concurrency?: number }) => {
+    const azureOk = azureImageConfigured();
     // Validate non-empty items array
     if (!req?.items || !Array.isArray(req.items) || req.items.length === 0) {
       return { ok: false, results: [] };
@@ -261,10 +306,11 @@ function registerIpc(): void {
       }
     }
     // Validate Azure is configured
-    if (!azureImageConfigured()) {
+    if (!azureOk) {
       return { ok: false, results: req.items.map((i: any) => ({ id: i.id || '', ok: false, error: 'Azure image is not configured' })) };
     }
-    return batchGenerateImages(req as any);
+    const result = await batchGenerateImages(req as any);
+    return result;
   });
 
   // Critique (5-dim)
@@ -273,6 +319,7 @@ function registerIpc(): void {
   // PDF + PPTX export
   ipcMain.handle('renoir:export:pdf',  (_e, req) => exportArtifactToPdf(req));
   ipcMain.handle('renoir:export:pptx', (_e, req) => exportArtifactToPptx(req));
+  ipcMain.handle('renoir:export:document', (_e, req) => exportDocumentToFile(req));
 
   // Persistent render assets per project
   ipcMain.handle('renoir:assets:list', (_e, req: { projectId: string }) =>
@@ -338,7 +385,7 @@ function registerIpc(): void {
   });
 
   // Version snapshots
-  ipcMain.handle('renoir:projects:addVersion', (_e, req: { id: string; html: string; source?: 'assistant' | 'fork' | 'restore'; note?: string }) => {
+  ipcMain.handle('renoir:projects:addVersion', (_e, req: { id: string; html: string; source?: 'assistant' | 'fork' | 'restore'; note?: string; skillId?: string }) => {
     const rec = store.getProject(req.id);
     if (!rec) return { ok: false, error: 'project not found' };
     if (!rec.versions) rec.versions = [];
@@ -353,6 +400,17 @@ function registerIpc(): void {
     });
     // A new assistant version overrides any restore selection.
     if (req.source !== 'restore') rec.activeVersionId = undefined;
+    const skillKey = req.skillId ?? rec.skillId;
+    if (skillKey) {
+      if (!rec.skillSessions) rec.skillSessions = {};
+      rec.skillSessions[skillKey] = {
+        ...rec.skillSessions[skillKey],
+        conversation: rec.conversation,
+        versions: rec.versions,
+        activeVersionId: rec.activeVersionId,
+        previewHtml: req.html,
+      };
+    }
     rec.updatedAt = new Date().toISOString();
     store.upsertProject(rec);
     return { ok: true, project: rec };
@@ -408,6 +466,7 @@ function registerIpc(): void {
 
   // HyperFrames
   ipcMain.handle('renoir:hyperframes:render', (_e, req) => renderHyperFrames(req));
+  ipcMain.handle('renoir:preview:record', (_e, req) => recordPreview(req));
 
   // Lint + brand spec
   ipcMain.handle('renoir:lint:artifact', (_e, html: string) => lintArtifact(html || ''));
@@ -451,6 +510,7 @@ function registerIpc(): void {
 
   // Workspace
   ipcMain.handle('renoir:workspace:open',  () => openWorkspaceFolder());
+  ipcMain.handle('renoir:workspace:get',   () => ({ path: workspaceRoot() }));
   ipcMain.handle('renoir:workspace:write', (_e, req) => writeArtifact(req));
 }
 

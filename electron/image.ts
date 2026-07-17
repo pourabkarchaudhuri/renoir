@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import { azureConfig, azureImageConfigured } from './env.js';
 import { deriveAzureUrl } from './azure-url.js';
 import { projectDir, workspaceRoot } from './workspace.js';
+import { clampImageSize } from '../shared/image-size.js';
 
 export interface ImageGenRequest {
   prompt: string;
@@ -44,7 +45,7 @@ export interface ImageEditRequest {
 }
 
 export async function editImage(req: ImageEditRequest): Promise<ImageGenResult> {
-  if (!azureImageConfigured()) return { ok: false, error: 'AZURE_NOT_CONFIGURED' };
+  if (!azureImageConfigured()) return { ok: false, error: 'AZURE_IMAGE_NOT_CONFIGURED' };
   const cfg = azureConfig();
   const url = deriveAzureUrl({
     endpoint: cfg.imageEndpoint, apiVersion: cfg.apiVersion,
@@ -66,7 +67,7 @@ export async function editImage(req: ImageEditRequest): Promise<ImageGenResult> 
   };
   pushField('model', cfg.imageModel);
   pushField('prompt', req.prompt);
-  pushField('size', req.size || '1024x1024');
+  pushField('size', clampImageSize(req.size));
   pushField('n', String(Math.max(1, Math.min(4, req.n ?? 1))));
   pushFile('image', 'image.png', req.imageMime || 'image/png', req.imageBase64);
   if (req.maskBase64) pushFile('mask', 'mask.png', 'image/png', req.maskBase64);
@@ -89,7 +90,7 @@ export async function editImage(req: ImageEditRequest): Promise<ImageGenResult> 
   }
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    return { ok: false, error: `Azure ${res.status}: ${text.slice(0, 320)}` };
+    return { ok: false, error: `Azure ${res.status} @ ${url}: ${text}` };
   }
   const json = await res.json().catch(() => null) as any;
   const data = Array.isArray(json?.data) ? json.data : [];
@@ -120,7 +121,7 @@ export async function editImage(req: ImageEditRequest): Promise<ImageGenResult> 
 
 export async function generateImage(req: ImageGenRequest): Promise<ImageGenResult> {
   if (!azureImageConfigured()) {
-    return { ok: false, error: 'AZURE_NOT_CONFIGURED' };
+    return { ok: false, error: 'AZURE_IMAGE_NOT_CONFIGURED' };
   }
   const cfg = azureConfig();
   const url = deriveAzureUrl({
@@ -136,10 +137,8 @@ export async function generateImage(req: ImageGenRequest): Promise<ImageGenResul
   const body: Record<string, unknown> = {
     model:  cfg.imageModel,
     prompt: req.prompt,
-    size:   req.size ?? '1024x1024',
+    size:   clampImageSize(req.size),
     n:      Math.max(1, Math.min(4, req.n ?? 1)),
-    output_format: 'png',
-    output_compression: 100,
   };
   if (req.quality) body.quality = req.quality;
 
@@ -149,7 +148,8 @@ export async function generateImage(req: ImageGenRequest): Promise<ImageGenResul
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.imageApiKey}`,
+        'api-key':       cfg.imageApiKey,
+        Authorization:  `Bearer ${cfg.imageApiKey}`, // works for v1 Foundry endpoints
       },
       body: JSON.stringify(body),
     });
@@ -159,7 +159,7 @@ export async function generateImage(req: ImageGenRequest): Promise<ImageGenResul
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    return { ok: false, error: `Azure ${res.status}: ${text.slice(0, 320)}` };
+    return { ok: false, error: `Azure ${res.status} @ ${url}: ${text}` };
   }
 
   const json = await res.json().catch(() => null) as any;

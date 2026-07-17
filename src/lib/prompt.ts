@@ -1,6 +1,12 @@
 // Composes the system prompt for the LLM from active skill + design system + answers.
 
 import type { SkillSummary, DesignSystemSummary, VisualDirection, BrandSpec } from '@/types/global';
+import { dashboardLayoutPromptLines } from '@shared/dashboard-layout';
+import { blogPostPromptLines } from '@shared/blog-post-layout';
+import { changelogPromptLines } from '@shared/changelog-layout';
+import { marketingSitePromptLines } from '@shared/marketing-site-layout';
+import { FAST_PATH_SKILL_IDS } from '@shared/generation-budgets';
+import { productDeckPromptLines } from '@/lib/product-deck-content';
 
 export interface PromptComposition {
   system: string;
@@ -11,12 +17,14 @@ const FRAME = `You are Renoir, a design-fluent assistant that produces real, wor
 
 Hard rules:
 1. Whenever you emit a designed artifact, return ONE self-contained HTML document inside an <artifact> ... </artifact> block. The document must be runnable in a sandboxed iframe (no remote network at all aside from a Tailwind CDN <script src="https://cdn.tailwindcss.com"></script> and Google Fonts).
-2. Use inline <style> for any custom rules. Inline images via data URIs only when essential. Otherwise use CSS color blocks instead of placeholder photography.
+2. Do NOT emit empty <img> tags, photo placeholders, or colored blocks meant to be filled with AI-generated photography unless the user explicitly asked for generated images. Use inline SVG, CSS gradients, geometric shapes, and tinted surfaces for visuals instead. Inline images via data URIs only when essential.
 3. Outside the <artifact> block, write at MOST one sentence of intent (what you produced and why) and one optional "TODO" line listing follow-ups. No reasoning, no narration of the steps you took, no "let me", "I'll first", "thinking through". Skip apologies and meta-commentary entirely.
 4. Never apologize, never explain HTML mechanics. Never ask permission to begin.
 5. Honor the active design system tokens. If a token is missing, infer a sibling.
 6. When the user has not given a brief that contains audience + tone + scope, respond ONLY with a <question-form> block (see below) and stop. Do not improvise an artifact. If the user's prompt already contains clear audience, tone, and scope information, skip the question-form and produce the artifact directly.
+6b. If ANY user message starts with "Brief:" (brief locked), NEVER emit <question-form> again — produce the <artifact> directly using those answers.
 7. If the user attaches images or files, treat them as references. Briefly acknowledge what you took from them in your one-line intent — colors, layout, mood — without recapping their contents.
+8. Never embed image-generation placeholders by default. Only use empty <img> slots or photo-placeholder patterns when the user explicitly asked to generate images (e.g. "generate images", "fill placeholders with photos", "use AI images for the hero").
 
 # Visual design expertise
 
@@ -262,7 +270,29 @@ Background patterns:
 - Subtle topography: layered conic-gradients at very low opacity for organic feel.
 `;
 
-/** Skills that skip the turn-1 question form and generate the artifact immediately. */
+const FRAME_SLIM = `You are Renoir, a design-fluent assistant that produces real, working artifacts.
+
+Hard rules:
+1. Emit ONE self-contained HTML document inside <artifact>...</artifact>. Use a single inline <style> block with :root design-system tokens.
+2. Outside the artifact: at most one sentence of intent. No step-by-step narration.
+3. Honor active design-system tokens (--bg, --fg, --accent, --muted, --surface, --border).
+4. Never emit <question-form> — infer audience, tone, and scope from the brief and produce the artifact on turn 1.
+5. Specific copy only — no lorem ipsum. Semantic HTML, responsive ≤768px.
+
+Keep CSS compact. No animations unless essential.`;
+
+/** Appended when the user is revising an existing complete artifact. */
+export const REVISION_PROMPT_ADDENDUM = `# Revision turn
+
+The conversation already has a complete artifact. Treat the latest <artifact> in context as the living source of truth (it may include post-processed images and lint fixes).
+
+Rules:
+1. Apply ONLY the user's requested change. Preserve all other content, layout, CSS, spacing, styling, images, tables, code blocks, references, and structure unless the user explicitly asks to change them.
+2. Identify the affected region (section, paragraph, element, or [data-od-id="…"] target when named) and edit surgically.
+3. Still emit ONE full self-contained HTML document inside a single <artifact>…</artifact> block — the preview pipeline requires a complete document.
+4. Outside the artifact: at most one short sentence stating what changed. No step-by-step narration.
+5. Do not emit <question-form>. Do not restart from a blank page.`;
+
 export function usesDirectArtifactGeneration(skill?: { id?: string } | null): boolean {
   return skill?.id === 'pricing-page' || skill?.id === 'web-prototype' || skill?.id === 'pitch-deck' || skill?.id === 'all-hands-deck';
 }
@@ -284,47 +314,47 @@ export function directGenerateKickMessage(skillId?: string): string {
 const DIRECT_ARTIFACT_OVERRIDE = `## Turn 1 (overrides FRAME rule 6)
 - Never emit <question-form>. Do not ask clarifying questions.
 - On the first user message, output the complete <artifact> immediately.
-- If audience, tone, product name, or tier details are missing, infer sensible defaults from the brief — do not stop to collect answers.`;
+- If audience, tone, product name, or tier details are missing, infer sensible defaults from the brief ΓÇö do not stop to collect answers.`;
 
 /** Overrides conflicting FRAME guidance when generating client-facing web pages. */
 const WEB_PROTOTYPE_QUALITY = `# Web prototype quality bar (overrides conflicting rules above)
 
-This is a client deliverable — a polished, shippable single-page website. Apply these rules even if they contradict earlier sections:
+This is a client deliverable ΓÇö a polished, shippable single-page website. Apply these rules even if they contradict earlier sections:
 
 ${DIRECT_ARTIFACT_OVERRIDE}
 
 ## Stack
 - Do NOT use Tailwind CDN. One <style> block + CSS custom properties only.
 - Map injected design tokens to :root: --bg, --surface, --fg, --muted, --accent, --accent2. Derive --border: color-mix(in oklch, var(--muted) 30%, transparent).
-- Serif display for h1–h3 (from design system font stack). Sans body. Mono for prices/stats/eyebrows.
-- Sticky frosted topnav, container ~1120px, 8pt spacing, 64–96px section padding.
+- Serif display for h1ΓÇôh3 (from design system font stack). Sans body. Mono for prices/stats/eyebrows.
+- Sticky frosted topnav, container ~1120px, 8pt spacing, 64ΓÇô96px section padding.
 
-## Required sections (minimum 6 — no wireframes)
-1. Hero — specific headline from brief + subhead + primary CTA + visual (inline SVG or .ph-img placeholder).
-2. Services/features — 3–6 cards with inline SVG icons (not emoji), domain-specific copy.
-3. Gallery/showcase — grid of 3–6 items relevant to the business.
-4. Social proof — quote, hours/location, or logo strip (only if brief provides info).
-5. Booking/pricing CTA band — clear next step.
-6. Footer — business name, nav, contact/hours.
+## Required sections (minimum 6 ΓÇö no wireframes)
+1. Hero ΓÇö specific headline from brief + subhead + primary CTA + visual (inline SVG or .ph-img placeholder).
+2. Services/features ΓÇö 3ΓÇô6 cards with inline SVG icons (not emoji), domain-specific copy.
+3. Gallery/showcase ΓÇö grid of 3ΓÇô6 items relevant to the business.
+4. Social proof ΓÇö quote, hours/location, or logo strip (only if brief provides info).
+5. Booking/pricing CTA band ΓÇö clear next step.
+6. Footer ΓÇö business name, nav, contact/hours.
 
 ## Banned (P0)
 - Sparse pages (nav + headline + one button on empty canvas).
 - Gradient orbs, purple/violet mesh backgrounds, generic AI-startup layouts.
 - Invented metrics, fake testimonials, stock photo URLs, lorem ipsum, "Feature One/Two".
 - Emoji icons. Bullet-list nav as the entire page.
-- Raw hex outside :root. Accent used more than 2× per screen.
+- Raw hex outside :root. Accent used more than 2├ù per screen.
 
 ## Polish
 - Single theme matching the design system is fine (dual light/dark optional).
-- Headlines must name the client's business — never generic "Welcome".
-- Hover/focus on all interactive elements. Mobile grid collapse at ≤920px.
-- **Header/nav:** flex row with wrap; logo + links + CTA must never overflow. Use \`flex-wrap: wrap\`, \`min-width: 0\`, \`box-sizing: border-box\` on header children. CTA label ≤12 chars on narrow screens ("Book" not "Book online" if tight). Links shrink or wrap to a second row below 640px — never clip off-screen.
+- Headlines must name the client's business ΓÇö never generic "Welcome".
+- Hover/focus on all interactive elements. Mobile grid collapse at Γëñ920px.
+- **Header/nav:** flex row with wrap; logo + links + CTA must never overflow. Use \`flex-wrap: wrap\`, \`min-width: 0\`, \`box-sizing: border-box\` on header children. CTA label Γëñ12 chars on narrow screens ("Book" not "Book online" if tight). Links shrink or wrap to a second row below 640px ΓÇö never clip off-screen.
 - Self-check: Would you invoice a client for this? If not, add sections and polish until yes.`;
 
 /** Overrides conflicting FRAME guidance when generating a pricing page. */
 const PRICING_PAGE_QUALITY = `# Pricing page quality bar (overrides conflicting rules above)
 
-This is a client deliverable — a polished, shippable **pricing page** (not a full landing site). Apply these rules even if they contradict earlier sections:
+This is a client deliverable ΓÇö a polished, shippable **pricing page** (not a full landing site). Apply these rules even if they contradict earlier sections:
 
 ${DIRECT_ARTIFACT_OVERRIDE}
 - When tier names, prices, or feature bullets are unspecified, use the **Free / Standard / Premium** defaults below and write domain-specific copy (e.g. salon appointments, SaaS seats) from whatever context the user gave.
@@ -333,43 +363,43 @@ ${DIRECT_ARTIFACT_OVERRIDE}
 - Do NOT use Tailwind CDN. One <style> block + CSS custom properties only.
 - Map injected design tokens to :root: --bg, --surface, --surface2, --fg, --muted, --accent, --accent2. Derive --border: color-mix(in oklch, var(--muted) 22%, transparent).
 - Match the active design system (e.g. Ember: warm ink background, amber accent sparingly on the recommended tier only).
-- Serif display for tier names (h1–h2 scale). Sans for body, bullets, and price suffixes. Mono optional for "$" amounts.
-- Page max-width ~1120px centered. 8pt spacing rhythm. Cards use border-radius from DS (≈12–16px).
+- Serif display for tier names (h1ΓÇôh2 scale). Sans for body, bullets, and price suffixes. Mono optional for "$" amounts.
+- Page max-width ~1120px centered. 8pt spacing rhythm. Cards use border-radius from DS (Γëê12ΓÇô16px).
 
 ## Layout (Claude-inspired three-card row)
-1. **Compact header** — product logo/wordmark + 3–5 nav links + one accent CTA (≤12 chars on mobile).
-2. **Hero** — "Pricing" or "[Product] pricing" + one-line subhead. Optional **monthly / annual** pill toggle (CSS-only; swap displayed prices).
-3. **Plan cards (required)** — exactly **3 equal columns** on desktop (≥1024px), **stack to 1 column** on ≤1024px (covers tablet 820px and phone 390px slide previews):
+1. **Compact header** ΓÇö product logo/wordmark + 3ΓÇô5 nav links + one accent CTA (Γëñ12 chars on mobile).
+2. **Hero** ΓÇö "Pricing" or "[Product] pricing" + one-line subhead. Optional **monthly / annual** pill toggle (CSS-only; swap displayed prices).
+3. **Plan cards (required)** ΓÇö exactly **3 equal columns** on desktop (ΓëÑ1024px), **stack to 1 column** on Γëñ1024px (covers tablet 820px and phone 390px slide previews):
    - Dark --surface cards on --bg canvas, 1px --border, subtle hover lift (translateY(-2px), stronger border).
-   - Top: small inline SVG icon (abstract mark — not emoji), unique per tier.
+   - Top: small inline SVG icon (abstract mark ΓÇö not emoji), unique per tier.
    - Tier name in large serif. Subtitle line under the name.
    - **Price** large and bold; billing note smaller (--muted).
-   - Bulleted features with ✓ checkmarks (CSS or inline SVG).
-   - Full-width CTA button at card bottom (high contrast: light button on dark card OR accent fill — pick one system-wide).
-   - **Standard** (middle) is the recommended tier: subtle scale(1.02–1.04), accent top border or "Popular" badge — accent used here only.
-4. **Comparison table** — feature rows × 3 tier columns; ✓ / — / text cells; sticky header; group rows (Core, Collaboration, Support…).
-5. **FAQ** — 4–6 items using <details><summary> (no JS).
-6. **Footer** — slim: product name, links, copyright.
+   - Bulleted features with Γ£ô checkmarks (CSS or inline SVG).
+   - Full-width CTA button at card bottom (high contrast: light button on dark card OR accent fill ΓÇö pick one system-wide).
+   - **Standard** (middle) is the recommended tier: subtle scale(1.02ΓÇô1.04), accent top border or "Popular" badge ΓÇö accent used here only.
+4. **Comparison table** ΓÇö feature rows ├ù 3 tier columns; Γ£ô / ΓÇö / text cells; sticky header; group rows (Core, Collaboration, SupportΓÇª).
+5. **FAQ** ΓÇö 4ΓÇô6 items using <details><summary> (no JS).
+6. **Footer** ΓÇö slim: product name, links, copyright.
 
 ## Default tiers (use unless brief / # Brief answers override)
-When the user does NOT specify custom tier names, prices, or feature lists, use **Free**, **Standard**, **Premium** with this structure — adapt product name and feature wording to the brief (e.g. salon, SaaS, app):
+When the user does NOT specify custom tier names, prices, or feature lists, use **Free**, **Standard**, **Premium** with this structure ΓÇö adapt product name and feature wording to the brief (e.g. salon, SaaS, app):
 
 ### Free
 - Subtitle: "Try [Product]" or "Get started"
-- Price: **$0** — note: "Free for everyone"
-- Features (6–10 bullets): core access — chat/web/mobile, basic creation, limited usage, essential integrations. Wording must fit the product domain.
+- Price: **$0** ΓÇö note: "Free for everyone"
+- Features (6ΓÇô10 bullets): core access ΓÇö chat/web/mobile, basic creation, limited usage, essential integrations. Wording must fit the product domain.
 
 ### Standard (recommended / middle card)
 - Subtitle: "For everyday productivity" (or domain equivalent)
-- Price: **$17**/mo with annual discount note ("Per month with annual subscription — $200 billed up front. $20 if billed monthly.") OR adapt to product.
+- Price: **$17**/mo with annual discount note ("Per month with annual subscription ΓÇö $200 billed up front. $20 if billed monthly.") OR adapt to product.
 - Lead-in: "Everything in Free, plus:"
-- Features: more usage, premium modules, projects/workspaces, research/advanced tools, priority models — domain-specific.
+- Features: more usage, premium modules, projects/workspaces, research/advanced tools, priority models ΓÇö domain-specific.
 
 ### Premium
 - Subtitle: "Get the most out of [Product]"
 - Price: **From $100**/mo
 - Lead-in: "Everything in Standard, plus:"
-- Features: 5×–20× usage, higher output limits, early access, priority at peak times.
+- Features: 5├ùΓÇô20├ù usage, higher output limits, early access, priority at peak times.
 
 If \`tiers\` or \`product\` appears in brief answers with custom values, **replace defaults entirely** with the user's tiers.
 
@@ -381,7 +411,7 @@ If \`tiers\` or \`product\` appears in brief answers with custom values, **repla
 
 ## Polish
 - Dark theme from design tokens is preferred; light optional if DS is light-first.
-- Slide preview viewports are **390×844** (phone) and **820×1180** (tablet) — no horizontal overflow; each section must fit one screen without clipping.
+- Slide preview viewports are **390├ù844** (phone) and **820├ù1180** (tablet) ΓÇö no horizontal overflow; each section must fit one screen without clipping.
 - All prices plausible for the product category. CTAs action-specific ("Get Standard", "Start free").
 - Toggle animates price labels. Table scrolls horizontally on narrow screens if needed.
 - Self-check: Does this look like a premium pricing page you'd ship? If not, enrich copy and comparison rows until yes.`;
@@ -389,7 +419,7 @@ If \`tiers\` or \`product\` appears in brief answers with custom values, **repla
 /** Overrides conflicting FRAME guidance when generating an investor pitch deck. */
 const PITCH_DECK_QUALITY = `# Pitch deck quality bar (overrides conflicting rules above)
 
-This is a client deliverable — a polished, **10-slide investor pitch deck** (not a landing page or doc). Apply these rules even if they contradict earlier sections:
+This is a client deliverable ΓÇö a polished, **10-slide investor pitch deck** (not a landing page or doc). Apply these rules even if they contradict earlier sections:
 
 ${DIRECT_ARTIFACT_OVERRIDE}
 - When company name, sector, stage, traction, or ask are unspecified, invent plausible startup defaults from the brief (e.g. "Arcline", seed stage, "$2.4M ARR", "$3M seed ask").
@@ -397,35 +427,35 @@ ${DIRECT_ARTIFACT_OVERRIDE}
 ## Stack
 - Do NOT use Tailwind CDN. One <style> block + CSS custom properties only.
 - Map injected design tokens to :root: --bg, --surface, --fg, --muted, --accent, --accent2. Derive --grad: linear-gradient(135deg, var(--accent), var(--accent2)).
-- Import 1–2 Google Fonts (display + sans). VC aesthetic: white/light bg OR dark ink bg with blue→purple gradient accents — match the active design system.
+- Import 1ΓÇô2 Google Fonts (display + sans). VC aesthetic: white/light bg OR dark ink bg with blueΓåÆpurple gradient accents ΓÇö match the active design system.
 - Body may use class="tpl-pitch-deck" for scoped deck styles.
 
 ## Slide markup (required for Renoir present-mode preview)
 - Wrap all slides in <main>.
 - Output **exactly 10 slides** as direct children of <main>:
-  \`<section data-slide="1" aria-label="Cover">…</section>\` through \`data-slide="10"\`.
-- Each slide: \`min-height: 100vh; width: 100%; box-sizing: border-box; padding: 72px 96px;\` (scale padding down at ≤820px).
-- Do NOT rely on JS slide navigation inside the artifact — Renoir's preview bridge handles horizontal slide nav.
-- Optional per-slide footer: \`<footer class="deck-footer">[Company] · Slide N/10</footer>\` inside each section.
+  \`<section data-slide="1" aria-label="Cover">ΓÇª</section>\` through \`data-slide="10"\`.
+- Each slide: \`min-height: 100vh; width: 100%; box-sizing: border-box; padding: 72px 96px;\` (scale padding down at Γëñ820px).
+- Do NOT rely on JS slide navigation inside the artifact ΓÇö Renoir's preview bridge handles horizontal slide nav.
+- Optional per-slide footer: \`<footer class="deck-footer">[Company] ┬╖ Slide N/10</footer>\` inside each section.
 
-## Required slides (in this order — one section each)
-1. **Cover** — company name, one-line pitch, founder/round tagline, decorative gradient orb.
-2. **Problem** — big question or pain headline + 2–3 bullets with real-world stakes.
-3. **Solution** — product name + how it solves the problem; hero visual (inline SVG or CSS diagram).
-4. **Market Opportunity** — TAM/SAM/SOM or market size with 2–3 metric callouts.
-5. **Product Overview** — screenshot-style mockup (CSS/SVG), 3–4 feature bullets.
-6. **Business Model** — pricing tiers, unit economics, or revenue streams (concrete $ figures).
-7. **Go-To-Market Strategy** — channels, ICP, funnel or timeline (3–4 steps).
-8. **Competition** — 2×2 positioning matrix or comparison table vs 3 named competitors.
-9. **Financials / Metrics** — traction chart (CSS bars), ARR/MRR, growth %, retention — realistic numbers.
-10. **Ask / Closing** — funding amount, use-of-funds breakdown (3 buckets), contact / next step; gradient hero treatment.
+## Required slides (in this order ΓÇö one section each)
+1. **Cover** ΓÇö company name, one-line pitch, founder/round tagline, decorative gradient orb.
+2. **Problem** ΓÇö big question or pain headline + 2ΓÇô3 bullets with real-world stakes.
+3. **Solution** ΓÇö product name + how it solves the problem; hero visual (inline SVG or CSS diagram).
+4. **Market Opportunity** ΓÇö TAM/SAM/SOM or market size with 2ΓÇô3 metric callouts.
+5. **Product Overview** ΓÇö screenshot-style mockup (CSS/SVG), 3ΓÇô4 feature bullets.
+6. **Business Model** ΓÇö pricing tiers, unit economics, or revenue streams (concrete $ figures).
+7. **Go-To-Market Strategy** ΓÇö channels, ICP, funnel or timeline (3ΓÇô4 steps).
+8. **Competition** ΓÇö 2├ù2 positioning matrix or comparison table vs 3 named competitors.
+9. **Financials / Metrics** ΓÇö traction chart (CSS bars), ARR/MRR, growth %, retention ΓÇö realistic numbers.
+10. **Ask / Closing** ΓÇö funding amount, use-of-funds breakdown (3 buckets), contact / next step; gradient hero treatment.
 
 ## Layout & polish
-- Display headings: tight tracking, 48–72px on slide titles. Body 18–20px, max-width ~48ch for prose blocks.
-- Use CSS Grid/Flex for metric rows, comparison tables, and team cards — no overflow on 1280×800 desktop preview.
-- Gradient orbs (300–500px, blur 80px, low opacity) on slides 1 and 10 only.
+- Display headings: tight tracking, 48ΓÇô72px on slide titles. Body 18ΓÇô20px, max-width ~48ch for prose blocks.
+- Use CSS Grid/Flex for metric rows, comparison tables, and team cards ΓÇö no overflow on 1280├ù800 desktop preview.
+- Gradient orbs (300ΓÇô500px, blur 80px, low opacity) on slides 1 and 10 only.
 - Entrance: @keyframes fadeIn 400ms ease-out on slide content; respect prefers-reduced-motion.
-- Realistic copy — no lorem ipsum, no "Feature One", no John Doe. Plausible startup metrics.
+- Realistic copy ΓÇö no lorem ipsum, no "Feature One", no John Doe. Plausible startup metrics.
 
 ## Banned (P0)
 - Fewer or more than 10 slides. Single-page scrolling landing layout.
@@ -434,13 +464,13 @@ ${DIRECT_ARTIFACT_OVERRIDE}
 - Question forms or "let me know if you'd like changes".
 
 ## Self-check
-- Count <section data-slide> elements — must be exactly 10.
+- Count <section data-slide> elements ΓÇö must be exactly 10.
 - Would you present this deck to investors? If not, enrich metrics, competition, and ask slide until yes.`;
 
 /** Overrides conflicting FRAME guidance when generating an internal all-hands deck. */
 const ALL_HANDS_DECK_QUALITY = `# All-hands deck quality bar (overrides conflicting rules above)
 
-This is an **internal company update presentation** for employees — transparent, celebratory where earned, honest about risks. Not an investor pitch or landing page. Apply these rules even if they contradict earlier sections:
+This is an **internal company update presentation** for employees ΓÇö transparent, celebratory where earned, honest about risks. Not an investor pitch or landing page. Apply these rules even if they contradict earlier sections:
 
 ${DIRECT_ARTIFACT_OVERRIDE}
 - When company name, quarter, or metrics are unspecified, infer plausible defaults from the brief (e.g. "Meridian", "Q1 2026", "NPS 72", "12 new hires").
@@ -448,35 +478,35 @@ ${DIRECT_ARTIFACT_OVERRIDE}
 ## Stack
 - Do NOT use Tailwind CDN. One <style> block + CSS custom properties only.
 - Map injected design tokens to :root: --bg, --surface, --fg, --muted, --accent, --accent2.
-- Import 1–2 Google Fonts (display + sans). Professional internal tone — match the active design system; warm but not salesy.
+- Import 1ΓÇô2 Google Fonts (display + sans). Professional internal tone ΓÇö match the active design system; warm but not salesy.
 - Body may use class="tpl-all-hands" for scoped deck styles.
 
 ## Slide markup (required for Renoir present-mode preview)
 - Wrap all slides in <main>.
 - Output **exactly 10 slides** as direct children of <main>:
-  \`<section data-slide="1" aria-label="Title">…</section>\` through \`data-slide="10"\`.
-- Each slide: \`min-height: 100vh; width: 100%; box-sizing: border-box; padding: 72px 96px;\` (scale padding down at ≤820px).
-- Do NOT rely on JS slide navigation inside the artifact — Renoir's preview bridge handles horizontal slide nav.
-- Optional per-slide footer: \`<footer class="deck-footer">[Company] All-hands · Slide N/10</footer>\` inside each section.
+  \`<section data-slide="1" aria-label="Title">ΓÇª</section>\` through \`data-slide="10"\`.
+- Each slide: \`min-height: 100vh; width: 100%; box-sizing: border-box; padding: 72px 96px;\` (scale padding down at Γëñ820px).
+- Do NOT rely on JS slide navigation inside the artifact ΓÇö Renoir's preview bridge handles horizontal slide nav.
+- Optional per-slide footer: \`<footer class="deck-footer">[Company] All-hands ┬╖ Slide N/10</footer>\` inside each section.
 
-## Required slides (in this order — one section each)
-1. **Title Slide** — company name, "All-hands · [Month Year]" or quarter label, optional tagline.
-2. **Executive Summary** — 3–4 bullet highlights of the period (wins + focus areas).
-3. **Wins & Achievements** — 4–6 concrete wins with owners or teams named; celebrate shipped work.
-4. **KPI / Metrics Review** — 3–5 metric cards (revenue, users, NPS, retention, etc.) with trend arrows; realistic numbers.
-5. **Team Updates** — hiring, org changes, shout-outs; diverse names, specific roles.
-6. **Product Progress** — shipped features, milestones, demo mockup (CSS/SVG); timeline or checklist.
-7. **Risks & Challenges** — honest blockers, misses, or headwinds; 3–4 items with mitigation notes.
-8. **Upcoming Priorities** — top 3–5 focus areas for next quarter with owners.
-9. **Roadmap** — quarterly timeline (Q1–Q4) or milestone swimlane with 4–6 items.
-10. **Closing / Q&A** — thank-you, Slack/email for questions, next all-hands date; optional "Ask us anything" CTA.
+## Required slides (in this order ΓÇö one section each)
+1. **Title Slide** ΓÇö company name, "All-hands ┬╖ [Month Year]" or quarter label, optional tagline.
+2. **Executive Summary** ΓÇö 3ΓÇô4 bullet highlights of the period (wins + focus areas).
+3. **Wins & Achievements** ΓÇö 4ΓÇô6 concrete wins with owners or teams named; celebrate shipped work.
+4. **KPI / Metrics Review** ΓÇö 3ΓÇô5 metric cards (revenue, users, NPS, retention, etc.) with trend arrows; realistic numbers.
+5. **Team Updates** ΓÇö hiring, org changes, shout-outs; diverse names, specific roles.
+6. **Product Progress** ΓÇö shipped features, milestones, demo mockup (CSS/SVG); timeline or checklist.
+7. **Risks & Challenges** ΓÇö honest blockers, misses, or headwinds; 3ΓÇô4 items with mitigation notes.
+8. **Upcoming Priorities** ΓÇö top 3ΓÇô5 focus areas for next quarter with owners.
+9. **Roadmap** ΓÇö quarterly timeline (Q1ΓÇôQ4) or milestone swimlane with 4ΓÇô6 items.
+10. **Closing / Q&A** ΓÇö thank-you, Slack/email for questions, next all-hands date; optional "Ask us anything" CTA.
 
 ## Layout & polish
-- Display headings: 44–64px slide titles. Body 18–20px. Metric cards: elevation-1, radius-lg, accent only on key numbers.
-- CSS Grid for metric rows and roadmap timeline — no overflow on 1280×800 desktop preview.
+- Display headings: 44ΓÇô64px slide titles. Body 18ΓÇô20px. Metric cards: elevation-1, radius-lg, accent only on key numbers.
+- CSS Grid for metric rows and roadmap timeline ΓÇö no overflow on 1280├ù800 desktop preview.
 - Subtle gradient or branded band on title slide only; keep other slides clean and readable.
 - Staggered fade-in on metric cards (80ms delay); respect prefers-reduced-motion.
-- Realistic internal copy — no lorem ipsum, no "Team Member A", no fake Fortune-500 references.
+- Realistic internal copy ΓÇö no lorem ipsum, no "Team Member A", no fake Fortune-500 references.
 
 ## Banned (P0)
 - Fewer or more than 10 slides. Investor pitch framing (TAM, funding ask, VC gradients).
@@ -485,7 +515,7 @@ ${DIRECT_ARTIFACT_OVERRIDE}
 - Question forms or "let me know if you'd like changes".
 
 ## Self-check
-- Count <section data-slide> elements — must be exactly 10.
+- Count <section data-slide> elements ΓÇö must be exactly 10.
 - Would leadership present this to the whole company? If not, enrich KPIs, risks, and roadmap until yes.`;
 
 export function composeSystemPrompt(opts: {
@@ -496,8 +526,16 @@ export function composeSystemPrompt(opts: {
   direction?: VisualDirection;
   brand?: BrandSpec;
   answers?: Record<string, string>;
+  /** When true, append surgical revision rules for post-creation edits. */
+  revision?: boolean;
 }): PromptComposition {
-  const lines: string[] = [FRAME];
+  const useSlimFrame = Boolean(opts.skill?.id && FAST_PATH_SKILL_IDS.has(opts.skill.id));
+  const lines: string[] = [useSlimFrame ? FRAME_SLIM : FRAME];
+
+  if (opts.revision) {
+    lines.push('');
+    lines.push(REVISION_PROMPT_ADDENDUM);
+  }
 
   if (opts.skill) {
     lines.push('');
@@ -511,25 +549,58 @@ export function composeSystemPrompt(opts: {
     lines.push(`# Active design system: ${opts.designSystem.name}`);
     lines.push(`Vibe: ${opts.designSystem.vibe}`);
     lines.push(`Font stack: ${opts.designSystem.font}`);
-    if (opts.designTokens?.length) {
-      lines.push('Bind these exact values to :root CSS variables:');
-      for (const t of opts.designTokens) {
+    const tokens = opts.designTokens?.length ? opts.designTokens : opts.designSystem.tokens;
+    if (tokens?.length) {
+      lines.push('Tokens (use these exact CSS custom properties — do not invent hex values):');
+      for (const t of tokens) {
         lines.push(`  --${t.name}: ${t.value};`);
       }
-      lines.push('Derive --border: color-mix(in oklch, var(--muted) 30%, transparent);');
-      lines.push('Use --accent2 from tokens for secondary highlights if present.');
-    } else {
-      lines.push('Map palette swatches to --bg, --surface, --fg, --muted, --accent tokens.');
+      lines.push('Also derive --border, --radius-md, --elevation-1 from these tokens for Material-style surfaces.');
     }
   }
 
   if (opts.direction) {
     lines.push('');
-    lines.push(`# Visual direction: ${opts.direction.name}`);
+    lines.push(`# Direction palette: ${opts.direction.name}`);
     lines.push(opts.direction.tagline);
     lines.push(`Vibe: ${opts.direction.vibe}`);
     lines.push(`Font stack: ${opts.direction.font}`);
     lines.push('Palette swatches: ' + opts.direction.swatches.join(', '));
+    lines.push(
+      'Use direction swatches ONLY for secondary chart series, badges, and decorative accents. ' +
+      'Never override primary theme tokens (--bg, --surface, --fg, --accent).',
+    );
+  }
+
+  if (opts.skill?.id === 'dashboard') {
+    lines.push('');
+    lines.push(...dashboardLayoutPromptLines());
+  }
+
+  if (opts.skill?.id === 'product-deck') {
+    lines.push('');
+    lines.push(...productDeckPromptLines());
+  }
+
+  if (opts.skill?.id === 'saas-landing') {
+    lines.push('');
+    lines.push(...marketingSitePromptLines());
+    lines.push('');
+    lines.push('Skill override: emit the <artifact> immediately on turn 1 — never <question-form>. Prioritize a compact artifact under 280 lines.');
+  }
+
+  if (opts.skill?.id === 'blog-post') {
+    lines.push('');
+    lines.push(...blogPostPromptLines());
+    lines.push('');
+    lines.push('Skill override: emit the <artifact> immediately on turn 1 — never <question-form>.');
+  }
+
+  if (opts.skill?.id === 'changelog') {
+    lines.push('');
+    lines.push(...changelogPromptLines());
+    lines.push('');
+    lines.push('Skill override: emit the <artifact> immediately on turn 1 — never <question-form>.');
   }
 
   if (opts.brand) {
@@ -551,6 +622,7 @@ export function composeSystemPrompt(opts: {
       if (!v) continue;
       lines.push(`- ${k}: ${v}`);
     }
+    lines.push('Produce the <artifact> now. Never emit <question-form> again.');
   }
 
   if (opts.skill?.id === 'pricing-page') {
@@ -562,7 +634,7 @@ export function composeSystemPrompt(opts: {
   } else if (opts.skill?.id === 'all-hands-deck') {
     lines.push('');
     lines.push(ALL_HANDS_DECK_QUALITY);
-  } else if (opts.skill?.category === 'web') {
+  } else if (opts.skill?.category === 'web' && opts.skill?.id !== 'saas-landing' && opts.skill?.id !== 'blog-post' && opts.skill?.id !== 'changelog') {
     lines.push('');
     lines.push(WEB_PROTOTYPE_QUALITY);
   }
@@ -575,28 +647,53 @@ export interface ExtractedArtifact {
   complete: boolean;
 }
 
+/** Opening <artifact> tag — allows attributes (identifier, type, title, etc.). */
+const ARTIFACT_OPEN_RE = /<artifact\b[^>]*>/i;
+
 /**
  * Pull the first <artifact> block from a streamed assistant message.
  * Returns a partial when the closing tag has not arrived yet so the
  * preview iframe can re-render progressively as the stream lands.
  */
 export function extractArtifact(text: string): ExtractedArtifact | null {
-  const closed = text.match(/<artifact>([\s\S]*?)<\/artifact>/i);
-  if (closed) return { html: closed[1].trim(), complete: true };
-  const open = text.match(/<artifact>([\s\S]*)$/i);
-  if (open) return { html: open[1].trimStart(), complete: false };
-  return null;
+  const openTag = text.match(ARTIFACT_OPEN_RE);
+  if (!openTag || openTag.index === undefined) return null;
+
+  const contentStart = openTag.index + openTag[0].length;
+  const afterOpen = text.slice(contentStart);
+  const closeMatch = afterOpen.match(/<\/artifact>/i);
+  if (closeMatch && closeMatch.index !== undefined) {
+    return { html: afterOpen.slice(0, closeMatch.index).trim(), complete: true };
+  }
+  return { html: afterOpen.trimStart(), complete: false };
 }
 
 /** Strip the artifact span (open or closed) from a streamed assistant
  *  message so the chat surface never shows raw HTML. */
 export function stripArtifact(text: string): string {
   return text
-    .replace(/<artifact>[\s\S]*?<\/artifact>/gi, '')
-    .replace(/<artifact>[\s\S]*$/i, '')
+    .replace(/<artifact\b[^>]*>[\s\S]*?<\/artifact>/gi, '')
+    .replace(/<artifact\b[^>]*>[\s\S]*$/i, '')
     .replace(/<question-form>[\s\S]*?<\/question-form>/gi, '')
     .replace(/<question-form>[\s\S]*$/i, '')
     .trim();
+}
+
+/** Trim prior assistant HTML from LLM context — keeps the latest partial artifact when continuing. */
+export function conversationForLlm(
+  messages: { role: string; content: string; attachments?: unknown[] }[],
+  opts?: { keepLastArtifact?: boolean },
+): { role: string; content: string; attachments?: unknown[] }[] {
+  const lastAssistantIdx = messages.findLastIndex((m) => m.role === 'assistant');
+  return messages.map((m, i) => {
+    if (m.role !== 'assistant') return m;
+    if (opts?.keepLastArtifact && i === lastAssistantIdx) return m;
+    const stripped = stripArtifact(m.content).trim();
+    return {
+      ...m,
+      content: stripped || '(prior artifact omitted from context)',
+    };
+  });
 }
 
 /** Infer a contextual streaming phase from the buffer so the chat can
@@ -607,9 +704,9 @@ export function inferPhase(text: string, elapsedMs: number): string {
     return flavor[Math.floor(elapsedMs / 1800) % flavor.length];
   }
   if (/<question-form>/i.test(text)) return 'Locking the brief…';
-  const open = text.match(/<artifact>([\s\S]*)$/i);
-  if (open) {
-    const tail = open[1].slice(-600).toLowerCase();
+  const openTag = text.match(ARTIFACT_OPEN_RE);
+  if (openTag && openTag.index !== undefined) {
+    const tail = text.slice(openTag.index + openTag[0].length).slice(-600).toLowerCase();
     if (/deck-footer/i.test(tail))                          return 'Closing the deck…';
     if (/<\/?footer/.test(tail))                           return 'Closing the footer…';
     if (/ask-box|funding|use of funds/i.test(tail))                      return 'Writing the ask slide…';
@@ -669,4 +766,33 @@ export function extractQuestionForm(text: string):
     });
   }
   return out.length ? out : null;
+}
+
+/** True once the user has submitted the brief form (prevents re-showing it). */
+export function hasLockedBrief(conversation: { role: string; content: string }[]): boolean {
+  return conversation.some((m) => m.role === 'user' && /^Brief:/im.test(m.content));
+}
+
+/** Parse the latest "Brief:" user message into answer fields for the system prompt. */
+export function extractBriefFromConversation(
+  conversation: { role: string; content: string }[],
+): Record<string, string> {
+  for (let i = conversation.length - 1; i >= 0; i--) {
+    const m = conversation[i];
+    if (m.role !== 'user' || !/^Brief:/im.test(m.content)) continue;
+    const out: Record<string, string> = { locked: 'yes' };
+    for (const line of m.content.split('\n')) {
+      const match = line.match(/^-\s*([^:]+):\s*(.+)/);
+      if (!match) continue;
+      const label = match[1].trim().toLowerCase();
+      const value = match[2].trim();
+      if (!value) continue;
+      if (label.includes('who is this for') || label === 'audience') out.audience = value;
+      else if (label === 'tone') out.tone = value;
+      else if (label.includes('must be present') || label === 'scope') out.scope = value;
+      else out[label.replace(/[^\w]+/g, '_')] = value;
+    }
+    return out;
+  }
+  return {};
 }

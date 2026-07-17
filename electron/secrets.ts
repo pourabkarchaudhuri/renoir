@@ -50,7 +50,7 @@ function writeFallback(map: Record<string, string>): void {
 }
 
 export const secrets = {
-  async getByokKey(): Promise<string | null> {
+  async getStoredByokKey(): Promise<string | null> {
     if (keytar) {
       const stored = await keytar.getPassword(SERVICE, ACCOUNT_BYOK_KEY);
       if (stored) return stored;
@@ -58,9 +58,20 @@ export const secrets = {
       const stored = readFallback()[ACCOUNT_BYOK_KEY] ?? null;
       if (stored) return stored;
     }
+    return null;
+  },
+  async getByokKey(): Promise<string | null> {
+    const stored = await this.getStoredByokKey();
+    if (stored) return stored;
     // Dev fallback: allow BYOK_API_KEY from .env so developers don't need
     // to open Settings on every fresh install / userData wipe.
     return process.env.BYOK_API_KEY || null;
+  },
+  async getByokKeySource(): Promise<'keychain' | 'env' | 'none'> {
+    const stored = await this.getStoredByokKey();
+    if (stored) return 'keychain';
+    if (process.env.BYOK_API_KEY) return 'env';
+    return 'none';
   },
   async setByokKey(value: string): Promise<void> {
     if (keytar) {

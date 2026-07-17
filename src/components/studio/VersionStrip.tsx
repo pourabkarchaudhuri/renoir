@@ -93,6 +93,16 @@ export function VersionStrip({ onCompare }: { onCompare: (aId: string, bId: stri
                   </div>
                 );
               })}
+              {picked.length === 1 && activeId && picked[0] !== activeId && (
+                <button
+                  onClick={() => onCompare(picked[0], activeId)}
+                  className="btn-quiet text-[11px] shrink-0 ml-1"
+                  title="Compare picked version with currently active"
+                >
+                  <GitCompare className="h-3.5 w-3.5" />
+                  vs current
+                </button>
+              )}
               {picked.length === 2 && (
                 <button
                   onClick={() => onCompare(picked[0], picked[1])}

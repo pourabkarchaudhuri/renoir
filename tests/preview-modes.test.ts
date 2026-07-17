@@ -3,6 +3,7 @@ import {
   MERMAID_CDN,
   MERMAID_INIT_SCRIPT,
   NAV_BRIDGE,
+  countDeckSlides,
   defaultModeForSkill,
   hasMermaidContent,
   injectMermaidScript,
@@ -16,8 +17,9 @@ describe('MERMAID_CDN constant', () => {
 });
 
 describe('MERMAID_INIT_SCRIPT', () => {
-  it('includes the CDN script tag', () => {
-    expect(MERMAID_INIT_SCRIPT).toContain(`<script src="${MERMAID_CDN}"></script>`);
+  it('loads mermaid from the CDN', () => {
+    expect(MERMAID_INIT_SCRIPT).toContain(MERMAID_CDN);
+    expect(MERMAID_INIT_SCRIPT).toContain("s.src = '");
   });
 
   it('initializes mermaid with startOnLoad: false and securityLevel: strict', () => {
@@ -25,16 +27,24 @@ describe('MERMAID_INIT_SCRIPT', () => {
     expect(MERMAID_INIT_SCRIPT).toContain("securityLevel: 'strict'");
   });
 
-  it('calls mermaid.run with .mermaid querySelector', () => {
-    expect(MERMAID_INIT_SCRIPT).toContain("mermaid.run({ querySelector: '.mermaid' })");
+  it('calls mermaid.render per diagram with stored source', () => {
+    expect(MERMAID_INIT_SCRIPT).toContain('mm.render(id, src)');
+    expect(MERMAID_INIT_SCRIPT).toContain('__renoirRunMermaid');
+    expect(MERMAID_INIT_SCRIPT).toContain('data-renoir-mermaid-src');
+  });
+
+  it('does not auto-run mermaid before the preview is activated', () => {
+    expect(MERMAID_INIT_SCRIPT).not.toContain('DOMContentLoaded');
+    expect(MERMAID_INIT_SCRIPT).not.toContain('mermaid.run(');
   });
 
   it('wraps initialization in DOMContentLoaded listener', () => {
-    expect(MERMAID_INIT_SCRIPT).toContain("document.addEventListener('DOMContentLoaded'");
+    // Mermaid is loaded on demand when the preview bridge calls __renoirRunMermaid.
+    expect(MERMAID_INIT_SCRIPT).toContain('ensureMermaid');
   });
 
   it('guards against mermaid being undefined', () => {
-    expect(MERMAID_INIT_SCRIPT).toContain("typeof mermaid !== 'undefined'");
+    expect(MERMAID_INIT_SCRIPT).toContain('ensureMermaid');
   });
 });
 
@@ -69,8 +79,8 @@ describe('injectMermaidScript', () => {
     const html = '<html><head></head><body><pre class="mermaid">graph TD</pre></body></html>';
     const result = injectMermaidScript(html);
     expect(result).toContain(MERMAID_CDN);
-    expect(result).toContain('mermaid.initialize');
-    expect(result).toContain('mermaid.run');
+    expect(result).toContain('mm.initialize');
+    expect(result).toContain('mm.render(id, src)');
   });
 
   it('does not inject for non-mermaid HTML', () => {
@@ -158,6 +168,33 @@ describe('wrapWithBridge with mermaid injection', () => {
 });
 
 
+describe('countDeckSlides', () => {
+  it('counts data-slide markers', () => {
+    const html = '<div data-slide="1"></div><div data-slide="2"></div><div data-slide="3"></div>';
+    expect(countDeckSlides(html)).toBe(3);
+  });
+
+  it('counts section.slide inside .deck', () => {
+    const slides = Array.from({ length: 12 }, (_, i) => `<section class="slide">${i}</section>`).join('');
+    const html = `<div class="deck">${slides}</div>`;
+    expect(countDeckSlides(html)).toBe(12);
+  });
+
+  it('counts section.slide elements', () => {
+    const html = '<section class="slide">1</section>';
+    expect(countDeckSlides(html)).toBe(1);
+  });
+
+  it('counts multiple section tags', () => {
+    const html = '<section>A</section><section>B</section><section>C</section>';
+    expect(countDeckSlides(html)).toBe(3);
+  });
+
+  it('returns 1 when no deck structure is found', () => {
+    expect(countDeckSlides('<div>hello</div>')).toBe(1);
+  });
+});
+
 describe('defaultModeForSkill', () => {
   it('uses present mode for pitch-deck', () => {
     expect(defaultModeForSkill('pitch-deck')).toBe('present');
@@ -175,7 +212,57 @@ describe('defaultModeForSkill', () => {
 
 describe('NAV_BRIDGE present mode CSS', () => {
   it('hides in-artifact navigation buttons in present mode', () => {
-    expect(NAV_BRIDGE).toContain('.prev-btn,.next-btn,.slide-controls,.navigation{display:none!important;}');
+    expect(NAV_BRIDGE).toContain('.prev-btn,.next-btn,.slide-controls,.navigation');
+    expect(NAV_BRIDGE).toContain('a.skip-link,.skip-to-main,.skip-to-content');
+  });
+
+  it('shows one slide at a time via hidden attribute and is-active class', () => {
+    expect(NAV_BRIDGE).toContain('renoir-slide');
+    expect(NAV_BRIDGE).toContain("setAttribute('hidden'");
+    expect(NAV_BRIDGE).toContain("classList.add('is-active')");
+    expect(NAV_BRIDGE).toContain('opacity:1!important');
+    expect(NAV_BRIDGE).not.toContain('translateX(');
+  });
+
+  it('detects slides inside .deck container', () => {
+    expect(NAV_BRIDGE).toContain("document.querySelector('.deck')");
+    expect(NAV_BRIDGE).toContain('bootPresentIfDeck');
+  });
+
+  it('prefers data-screen-id flow screens over nested sections', () => {
+    expect(NAV_BRIDGE).toContain("document.querySelectorAll('[data-screen-id]')");
+    expect(NAV_BRIDGE).toContain("document.querySelectorAll('[data-screen-id]').length >= 2");
+  });
+
+  it('applies deck contrast helpers', () => {
+    expect(NAV_BRIDGE).toContain('applySlideContrast');
+    expect(NAV_BRIDGE).toContain('revealSlideAnimations');
+    expect(NAV_BRIDGE).toContain('ensureContrastStyles');
+  });
+
+  it('handles explicit preview reload messages', () => {
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:reload'");
+  });
+
+  it('supports point-and-edit pick messages', () => {
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:pick-enable'");
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:pick-disable'");
+    expect(NAV_BRIDGE).toContain("type: 'renoir:picked'");
+    expect(NAV_BRIDGE).toContain('data-od-id');
+  });
+
+  it('supports scroll-sync and flow walk messages', () => {
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:scroll-sync'");
+    expect(NAV_BRIDGE).toContain("type: 'renoir:scroll'");
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:flow-enable'");
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:flow-nav'");
+    expect(NAV_BRIDGE).toContain("type: 'renoir:flow-screen'");
+  });
+
+  it('supports live a11y probe messages', () => {
+    expect(NAV_BRIDGE).toContain("d.type === 'renoir:a11y-probe'");
+    expect(NAV_BRIDGE).toContain("type: 'renoir:a11y-report'");
+    expect(NAV_BRIDGE).toContain('runA11yProbe');
   });
 
   it('does not force a white background in present mode', () => {
@@ -197,12 +284,6 @@ describe('NAV_BRIDGE present mode CSS', () => {
     expect(NAV_BRIDGE).toContain('overflow:hidden!important');
     expect(NAV_BRIDGE).toContain('repeat(3,minmax(0,1fr))');
     expect(NAV_BRIDGE).toContain('@media(max-width:480px)');
-  });
-
-  it('detects .slide elements for deck templates', () => {
-    expect(NAV_BRIDGE).toContain(':scope > .slide');
-    expect(NAV_BRIDGE).toContain('.slide[data-renoir-active]');
-    expect(NAV_BRIDGE).toContain('body[data-renoir-mode="present"] .slide{');
   });
 });
 

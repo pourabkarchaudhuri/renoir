@@ -84,6 +84,7 @@ Wrap `index.html` in `<artifact>` tags. One sentence before describing what's th
 - **Image placeholders, not external URLs.** Use the `.ph-img` class — never link to a stock photo CDN.
 - **Mobile reflow already works** via the seed's media query at 920px. Don't break it by adding fixed widths.
 - **`data-od-id` on every `<section>`** so comment mode can target it.
+- **`data-screen-id` on each major screen/section** and **`data-goto="screen-id"`** on CTAs/links that navigate between screens (enables Walk mode + flow map).
 
 ## Output contract
 

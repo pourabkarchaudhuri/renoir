@@ -11,6 +11,7 @@
  */
 
 import type { Placeholder } from './image-placeholders';
+import { clampImageSize, type SafeImageGenSize } from '@shared/image-size';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────
 
@@ -33,7 +34,7 @@ export interface ImagePromptRequest {
 
 export interface DerivedImageRequest {
   prompt: string;
-  size: '1024x1024' | '1024x1536' | '1536x1024';
+  size: SafeImageGenSize;
   quality: 'low' | 'medium' | 'high';
   placeholderSelector: string;
 }
@@ -92,49 +93,26 @@ function parseDimension(value: string | undefined): number | null {
 
 /**
  * Determine image size based on placeholder aspect ratio.
- * - landscape (width > height × 1.2) → '1536x1024'
- * - portrait (height > width × 1.2) → '1024x1536'
- * - otherwise → '1024x1024'
+ * Neither axis may exceed 1024px — oversized requests are scaled down
+ * proportionally via clampImageSize (Azure-safe result: 1024×1024).
  */
 export function inferSizeFromPlaceholder(placeholder: Placeholder): DerivedImageRequest['size'] {
-  const { sizing } = placeholder;
-
-  let width: number | null = null;
-  let height: number | null = null;
-
-  // Try to parse width and height from sizing
-  width = parseDimension(sizing.width);
-  height = parseDimension(sizing.height);
-
-  // Try aspect-ratio if width/height not both available
-  if (sizing.aspectRatio && (width === null || height === null)) {
-    const arMatch = sizing.aspectRatio.match(/(\d+(?:\.\d+)?)\s*[\/]\s*(\d+(?:\.\d+)?)/);
-    if (arMatch) {
-      const arW = parseFloat(arMatch[1]);
-      const arH = parseFloat(arMatch[2]);
-      if (width !== null && height === null) {
-        height = width / (arW / arH);
-      } else if (height !== null && width === null) {
-        width = height * (arW / arH);
-      } else {
-        // Both null — use aspect ratio values directly
-        width = arW;
-        height = arH;
-      }
+  const { width, height, aspectRatio } = placeholder.sizing;
+  // Prefer explicit pixel dimensions when present; otherwise derive from AR.
+  const wPx = parseDimension(width);
+  const hPx = parseDimension(height);
+  if (wPx && hPx) {
+    return clampImageSize(`${Math.round(wPx)}x${Math.round(hPx)}`);
+  }
+  if (aspectRatio) {
+    const parts = aspectRatio.split('/').map((p) => parseFloat(p.trim()));
+    if (parts.length === 2 && parts[0] > 0 && parts[1] > 0) {
+      const ar = parts[0] / parts[1];
+      if (ar >= 1) return clampImageSize(`${1024}x${Math.round(1024 / ar)}`);
+      return clampImageSize(`${Math.round(1024 * ar)}x${1024}`);
     }
   }
-
-  if (width === null || height === null) {
-    return '1024x1024'; // default to square
-  }
-
-  if (width > height * 1.2) {
-    return '1536x1024'; // landscape
-  }
-  if (height > width * 1.2) {
-    return '1024x1536'; // portrait
-  }
-  return '1024x1024'; // square
+  return clampImageSize('1024x1024');
 }
 
 // ─── Hero Section Detection ──────────────────────────────────────────────────
@@ -169,6 +147,20 @@ function inferSubjectFromRole(placeholder: Placeholder): string {
 
   // Try to infer from class name
   if (context.className) {
+    const lower = context.className.toLowerCase();
+    if (lower.includes('ph-img') || lower.includes('img-slot')) {
+      const modifiers = lower
+        .replace(/\bph-img\b/g, '')
+        .replace(/\bimg-slot\b/g, '')
+        .replace(/\br-\d+x\d+\b/g, '')
+        .replace(/[-_]/g, ' ')
+        .trim();
+      if (modifiers && modifiers.length > 2) {
+        return `Image related to: ${modifiers}`;
+      }
+      return 'A content image for the page layout';
+    }
+
     const cleaned = context.className
       .replace(/placeholder/gi, '')
       .replace(/img-/gi, '')
@@ -191,6 +183,14 @@ function inferSubjectFromRole(placeholder: Placeholder): string {
   // Try to infer from aria-label
   if (context.ariaLabel) {
     return sanitize(context.ariaLabel).slice(0, 200);
+  }
+
+  // Try label text from image box inner content
+  if (context.labelText) {
+    const snippet = sanitize(context.labelText).slice(0, 200);
+    if (snippet) {
+      return snippet;
+    }
   }
 
   // Fallback based on kind
@@ -223,6 +223,14 @@ export function deriveImagePrompt(req: ImagePromptRequest): DerivedImageRequest 
     const sanitizedAlt = sanitize(truncateAltText(ctx.altText));
     if (sanitizedAlt && !GENERIC_ALT_TEXTS.has(sanitizedAlt.toLowerCase())) {
       parts.push(sanitizedAlt);
+    }
+  }
+
+  // 1b. Label text from image boxes (ph-img, img-slot) when no alt text
+  if (parts.length === 0 && ctx.labelText) {
+    const sanitizedLabel = sanitize(ctx.labelText);
+    if (sanitizedLabel && !GENERIC_ALT_TEXTS.has(sanitizedLabel.toLowerCase())) {
+      parts.push(sanitizedLabel);
     }
   }
 

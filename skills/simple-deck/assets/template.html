@@ -202,10 +202,29 @@
       font-family: var(--font-mono);
       font-size: 12px;
       letter-spacing: 0.04em;
+      overflow: hidden;
+      position: relative;
+      width: 100%;
+      max-width: 100%;
+      box-sizing: border-box;
     }
     .slide.dark .ph-img { border-color: rgba(250,250,247,0.18); color: rgba(250,250,247,0.5); }
     .ph-img.wide { aspect-ratio: 16 / 9; }
     .ph-img.tall { aspect-ratio: 3 / 4; }
+    .ph-img > img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center center;
+      display: block;
+      border: 0;
+    }
+    .ph-img:has(> img) {
+      display: block;
+      padding: 0;
+      color: transparent;
+      background-image: none;
+    }
 
     /* ─── chrome (counter, hint, progress) — fixed, never scrolls ──── */
     .deck-counter {

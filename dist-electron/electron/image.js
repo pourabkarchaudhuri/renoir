@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { azureConfig, azureImageConfigured } from './env.js';
 import { deriveAzureUrl } from './azure-url.js';
 import { projectDir, workspaceRoot } from './workspace.js';
+import { clampImageSize } from '../shared/image-size.js';
 function workspaceDir(projectId) {
     if (projectId) {
         return path.join(projectDir(projectId), 'images');
@@ -17,7 +18,7 @@ function safeName(prompt) {
 }
 export async function editImage(req) {
     if (!azureImageConfigured())
-        return { ok: false, error: 'AZURE_NOT_CONFIGURED' };
+        return { ok: false, error: 'AZURE_IMAGE_NOT_CONFIGURED' };
     const cfg = azureConfig();
     const url = deriveAzureUrl({
         endpoint: cfg.imageEndpoint, apiVersion: cfg.apiVersion,
@@ -39,7 +40,7 @@ export async function editImage(req) {
     };
     pushField('model', cfg.imageModel);
     pushField('prompt', req.prompt);
-    pushField('size', req.size || '1024x1024');
+    pushField('size', clampImageSize(req.size));
     pushField('n', String(Math.max(1, Math.min(4, req.n ?? 1))));
     pushFile('image', 'image.png', req.imageMime || 'image/png', req.imageBase64);
     if (req.maskBase64)
@@ -63,7 +64,7 @@ export async function editImage(req) {
     }
     if (!res.ok) {
         const text = await res.text().catch(() => '');
-        return { ok: false, error: `Azure ${res.status}: ${text.slice(0, 320)}` };
+        return { ok: false, error: `Azure ${res.status} @ ${url}: ${text}` };
     }
     const json = await res.json().catch(() => null);
     const data = Array.isArray(json?.data) ? json.data : [];
@@ -99,7 +100,7 @@ export async function editImage(req) {
 }
 export async function generateImage(req) {
     if (!azureImageConfigured()) {
-        return { ok: false, error: 'AZURE_NOT_CONFIGURED' };
+        return { ok: false, error: 'AZURE_IMAGE_NOT_CONFIGURED' };
     }
     const cfg = azureConfig();
     const url = deriveAzureUrl({
@@ -114,10 +115,8 @@ export async function generateImage(req) {
     const body = {
         model: cfg.imageModel,
         prompt: req.prompt,
-        size: req.size ?? '1024x1024',
+        size: clampImageSize(req.size),
         n: Math.max(1, Math.min(4, req.n ?? 1)),
-        output_format: 'png',
-        output_compression: 100,
     };
     if (req.quality)
         body.quality = req.quality;
@@ -127,7 +126,8 @@ export async function generateImage(req) {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                Authorization: `Bearer ${cfg.imageApiKey}`,
+                'api-key': cfg.imageApiKey,
+                Authorization: `Bearer ${cfg.imageApiKey}`, // works for v1 Foundry endpoints
             },
             body: JSON.stringify(body),
         });
@@ -137,7 +137,7 @@ export async function generateImage(req) {
     }
     if (!res.ok) {
         const text = await res.text().catch(() => '');
-        return { ok: false, error: `Azure ${res.status}: ${text.slice(0, 320)}` };
+        return { ok: false, error: `Azure ${res.status} @ ${url}: ${text}` };
     }
     const json = await res.json().catch(() => null);
     const data = Array.isArray(json?.data) ? json.data : [];

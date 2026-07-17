@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { BrowserWindow } from 'electron';
 import { generateImage } from './image.js';
+import { clampImageSize } from '../shared/image-size.js';
 // ─── Cache ───────────────────────────────────────────────────────────────────
 /** In-memory per-project caches. Key = projectId */
 const projectCaches = new Map();
@@ -112,7 +113,7 @@ export async function batchGenerateImages(req) {
     let completed = 0;
     let anySuccess = false;
     const tasks = items.map(async (item, index) => {
-        const size = item.size ?? '1024x1024';
+        const size = clampImageSize(item.size);
         const quality = item.quality ?? 'auto';
         const promptHash = computePromptHash(item.prompt, size, quality);
         // Check cache first

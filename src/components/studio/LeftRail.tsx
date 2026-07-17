@@ -5,8 +5,12 @@ import { cn } from '@/lib/cn';
 import { Sparkles, Palette, Wand2, ChevronDown, ChevronLeft, ChevronRight, Search, Check, Plus, MessageSquare, Pin, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { BrandSpecPanel } from './BrandSpecPanel';
+import { A11yPanel, a11yHtmlFromArtifact } from './A11yPanel';
+import { FlowMapPanel } from './FlowMapPanel';
 import { iconForSkill } from '@/lib/skill-icons';
-import { loadSession, projectHasSkillWork, skillDisplayName, setSkillSessionName, syncActiveSession } from '@/lib/skill-sessions';
+import { filterProjects } from '@/lib/project-search';
+import { loadSession, projectHasSkillWork, skillDisplayName, setSkillSessionName, syncActiveSession, previewHtmlForSkill } from '@/lib/skill-sessions';
+import { extractArtifact } from '@/lib/prompt';
 import { AgentPicker } from './AgentPicker';
 import { ByokInline } from './ByokInline';
 import type { ProjectRecord } from '@/types/global';
@@ -38,6 +42,21 @@ export function LeftRail() {
   const refreshProjects = async () => {
     const list = await window.renoir.listProjects();
     setProjects(list.sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt)));
+  };
+
+  const openNewPromptTab = async (activeSkill?: string) => {
+    const skill = activeSkill || skillId || 'web-prototype';
+    const rec = await window.renoir.createProject({
+      name: 'Untitled prompt',
+      skillId: skill,
+      conversation: [],
+      artifacts: [],
+      skillSessions: {},
+    });
+    setProject(loadSession(rec, skill));
+    setSkill(skill);
+    await refreshProjects();
+    return rec;
   };
 
   // Default selections.
@@ -73,6 +92,15 @@ export function LeftRail() {
   const activeStudy = project && skillId && project.skillId === skillId ? project : undefined;
   const collapsed = useUI((s) => s.railCollapsed);
   const toggleRail = useUI((s) => s.toggleRail);
+
+  const a11yArtifactHtml = useMemo(() => {
+    if (!project || !skillId) return null;
+    const cached = previewHtmlForSkill(project, skillId);
+    if (cached) return cached;
+    const last = project.conversation.findLast((m) => m.role === 'assistant');
+    if (!last) return null;
+    return extractArtifact(last.content)?.html ?? null;
+  }, [project, skillId]);
 
   if (collapsed) {
     return (
@@ -175,22 +203,24 @@ export function LeftRail() {
             setSkill(skillId);
           }}
           onCreate={async () => {
-            const activeSkill = skillId || 'web-prototype';
-            const rec = await window.renoir.createProject({
-              name: 'Untitled prompt',
-              skillId: activeSkill,
-              conversation: [],
-              artifacts: [],
-              skillSessions: {},
-            });
-            setProject(loadSession(rec, activeSkill));
-            setSkill(activeSkill);
-            await refreshProjects();
+            await openNewPromptTab();
           }}
           onDelete={(p) => { setPendingDelete(p); }}
           onRenamed={refreshProjects}
         />
       </div>
+      <A11yPanel
+        html={a11yHtmlFromArtifact(a11yArtifactHtml, {
+          title: project?.name?.trim() || 'Artifact',
+          skillId,
+        })}
+      />
+      <FlowMapPanel
+        artifactHtml={a11yArtifactHtml}
+        onNavigate={(screenId) => {
+          window.dispatchEvent(new CustomEvent('renoir:flow-nav-request', { detail: { screenId } }));
+        }}
+      />
       <BrandSpecPanel />
       <ConfirmDialog
         open={Boolean(pendingDelete)}
@@ -214,7 +244,7 @@ export function LeftRail() {
                 setProject(loadSession(next, activeSkill));
                 setSkill(activeSkill);
               } else {
-                setProject(null);
+                await openNewPromptTab(skillId || 'web-prototype');
               }
             }
             await refreshProjects();
@@ -254,19 +284,15 @@ function PromptTabs({
   const [menuFor, setMenuFor] = useState<{ id: string; top: number; left: number } | null>(null);
   const [renaming, setRenaming] = useState<ProjectRecord | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuAnchorRef = useRef<HTMLElement | null>(null);
   const renameBackdropDown = useRef(false);
 
   const sorted = useMemo(() => {
     const pinSet = new Set(pinnedIds);
-    return [...projects].sort((a, b) => {
-      const ap = pinSet.has(a.id) ? 1 : 0;
-      const bp = pinSet.has(b.id) ? 1 : 0;
-      if (ap !== bp) return bp - ap;
-      return +new Date(b.updatedAt) - +new Date(a.updatedAt);
-    });
-  }, [projects, pinnedIds]);
+    return filterProjects(projects, { query: searchQuery, sort: 'pinned', pinnedIds: [...pinSet] });
+  }, [projects, pinnedIds, searchQuery]);
 
   const togglePin = (id: string) => {
     setPinnedIds((prev) => {
@@ -346,6 +372,15 @@ function PromptTabs({
           <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
+      {projects.length > 2 && (
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Filter prompts…"
+          className="w-full mb-2 text-[11px] px-2 py-1 rounded border border-border bg-background"
+        />
+      )}
       <div className="space-y-1 max-h-[170px] overflow-y-auto scroll-thin">
         {!projects.length && (
           <p className="text-[11px] text-muted-foreground px-2 py-2 leading-relaxed">

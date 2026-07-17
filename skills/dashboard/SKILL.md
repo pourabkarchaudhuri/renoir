@@ -1,8 +1,8 @@
 ---
 name: dashboard
 description: |
-  Admin / analytics dashboard in a single HTML file. Fixed left sidebar,
-  top bar with user/search, main grid of KPI cards and one or two charts.
+  Admin / analytics dashboard in a single HTML file. Full-width layout with
+  a page header, KPI cards, and one or two charts — no sidebars or nav menus.
   Use when the brief asks for a "dashboard", "admin", "analytics", or
   "control panel" screen.
 triggers:
@@ -28,7 +28,7 @@ od:
 
 # Dashboard Skill
 
-Produce a single-screen admin / analytics dashboard.
+Produce a single-screen admin / analytics dashboard that is **production-ready at every breakpoint**.
 
 ## Workflow
 
@@ -37,30 +37,57 @@ Produce a single-screen admin / analytics dashboard.
 2. **Classify** what the dashboard monitors (sales, traffic, usage, incidents,
    ops, etc.) from the brief. Generate specific, plausible metric names and
    values — no "Metric A / Metric B" placeholders.
-3. **Lay out** the required regions:
-   - **Left sidebar** (220–260px): brand mark at top, 6–8 nav links with
-     icons, active state uses the DS accent.
-   - **Top bar**: page title on the left, search input + user avatar / status
-     on the right.
-   - **Main**:
-     - Row 1: 3–4 KPI cards (label + big number + delta vs. prior period).
-     - Row 2: one primary chart (full width or 2/3) — render as an inline SVG
-       line / bar / area chart drawn from real-looking numbers.
-     - Row 3: one secondary chart or table (recent events, top items, etc.).
-4. **Write** one self-contained HTML document:
+3. **Define the fixed region set** — these four regions must exist in the DOM at
+   **every** breakpoint (never add or remove between layouts; only rearrange):
+   - `data-od-id="topbar"` — page title, date range, primary actions (no nav links)
+   - `data-od-id="kpis"` — exactly 4 KPI cards (label + number + delta)
+   - `data-od-id="primary-chart"` — inline SVG line / bar / area chart
+   - `data-od-id="secondary-panel"` — secondary chart or recent-events table
+4. **No navigation chrome** — do not add sidebars, nav rails, hamburger menus,
+   or multi-page nav links. The dashboard is a single focused analytics view.
+5. **Lay out per breakpoint** (mobile-first CSS). Fill the entire viewport — no dead whitespace. When space is tight, **prioritize graphs** (primary-chart flexes largest; KPI row compresses first):
+   - **Mobile** (&lt;640px): single column; KPIs 2-col; charts stacked vertically.
+   - **Tablet** (640–1279px): 2-col KPI grid; charts stacked or side-by-side when space allows.
+   - **Desktop** (1280–1919px): full-width main; 4 KPI row;
+     primary chart 2/3 + secondary 1/3.
+   - **Ultrawide** (1920px+): same elements — widen the chart grid; never stretch widgets to fill void space.
+6. **Alignment rules** — at every width:
+   - No overlap, clipping, horizontal overflow, or unintended empty gutters.
+   - Use `min-width: 0` on grid/flex children; prefer `width: 100%` over `100vw`.
+   - 8px base grid with **spacious major-region gaps** (24px between sections, 32px page padding, 16px KPI gap, 20px chart row gap). Cards use 20–24px internal padding.
+   - **Uniform boxes**: all 4 KPI cards equal height per row (class `kpi`, 88px min-height); chart panels in a `panels-row` wrapper with equal row height and 24px padding.
+   - **No nested scrollbars**: only `<main>` scrolls; charts/tables/cards use `overflow:hidden` and flex scaling — never `overflow:auto` on widgets.
+7. **Write** one self-contained HTML document:
    - `<!doctype html>` through `</html>`, CSS in one inline `<style>` block.
-   - CSS Grid for the overall layout; Flexbox inside cards.
-   - Semantic HTML: `<aside>`, `<header>`, `<main>`, `<section>`.
-   - Tag each logical region with `data-od-id="slug"` for comment mode.
-5. **Charts**: inline SVG only, no JS libraries. A line chart is ~10 lines of
-   `<polyline>` with a subtle area fill. A bar chart is N `<rect>`s with
-   DS-accent fill. Label axes lightly (muted text, smaller scale).
-6. **Self-check**:
-   - Every color comes from DESIGN.md tokens.
-   - Accent used at most twice (sidebar active + one chart highlight).
-   - Sidebar + top bar are sticky; main scrolls independently.
-   - Density matches the DS mood — airy DSes get more padding, dense DSes
-     (trading, crypto) tighten rows.
+   - Flexbox column shell; grid inside KPI/chart rows.
+   - Semantic HTML: `<header>`, `<main>`, `<section>`.
+8. **Charts**: inline SVG only, no JS libraries. Plot every series from real numbers — see **Data plotting** below.
+9. **Self-check**:
+   - All four `data-od-id` regions present in HTML.
+   - No sidebar or nav menu markup.
+   - Every color from DESIGN.md tokens.
+   - Density matches the DS mood.
+   - Chart geometry matches the numeric series (higher values plot higher).
+   - No nested scrollbars on cards, charts, or tables — only main scrolls.
+
+## Data plotting (essential)
+
+Charts must be **accurate**, not decorative.
+
+1. Choose a numeric series (6–12 points for lines, 4–8 for bars) that matches the dashboard topic.
+2. KPI headline numbers must use the **same units** and order of magnitude as the chart.
+3. Map values to SVG coordinates:
+   - `min` / `max` from the series; `range = max - min` (use 1 if flat).
+   - Padding inside viewBox: top 16, left 44, right 16, bottom 28.
+   - `x = padLeft + (i / (N-1)) * plotWidth`
+   - `y = padTop + plotHeight - ((value - min) / range) * plotHeight`
+   - Bar height = `((value - min) / range) * plotHeight`
+4. SVG rules:
+   - `viewBox="0 0 W H"` and `preserveAspectRatio="xMidYMid meet"`.
+   - **Never** `preserveAspectRatio="none"` on line charts — it distorts data.
+   - Draw baseline + light gridlines at min/mid/max.
+   - Tag: `data-od-chart="line|bar"` and `data-od-series="v1,v2,..."`.
+5. Self-check: if KPI says growth, the line must trend up; re-read every y coordinate.
 
 ## Output contract
 
@@ -74,3 +101,4 @@ Emit between `<artifact>` tags:
 ```
 
 One sentence before the artifact, nothing after.
+

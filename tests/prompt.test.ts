@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import fc from 'fast-check';
 import {
   composeSystemPrompt, extractArtifact, extractQuestionForm,
-  stripArtifact, inferPhase, usesDirectArtifactGeneration, directGenerateKickMessage,
+  stripArtifact, inferPhase, hasLockedBrief, extractBriefFromConversation,
+  conversationForLlm, usesDirectArtifactGeneration, directGenerateKickMessage,
 } from '../src/lib/prompt';
 import { listSkills, getSkill } from '../electron/library';
 
@@ -22,6 +23,53 @@ describe('prompt composer', () => {
     expect(r.system).toContain('Output one HTML.');
   });
 
+  it('injects product deck requirements when skill is product-deck', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'product-deck', name: 'Product Deck', category: 'deck', emoji: '📽️', blurb: '12-slide walkthrough.' },
+      primer: 'Cover through contact.',
+    });
+    expect(r.system).toContain('# Product Deck requirements');
+    expect(r.system).toContain('slide-visual');
+    expect(r.system).toContain('12 slides');
+  });
+
+  it('injects marketing site layout contract when skill is saas-landing', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'saas-landing', name: 'SaaS Landing', category: 'web', emoji: '🚀', blurb: 'Multi-screen site.' },
+      primer: 'Three linked screens.',
+    });
+    expect(r.system).toContain('# SaaS Marketing Site — copy pass on staged shell');
+    expect(r.system).toContain('data-screen-id="landing"');
+    expect(r.system).toContain('"changelog"');
+    expect(r.system).toContain('"blog"');
+    expect(r.system).toContain('never <question-form>');
+  });
+
+  it('injects blog post layout contract when skill is blog-post', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'blog-post', name: 'Blog Post', category: 'doc', emoji: '✍️', blurb: 'Long-form article.' },
+      primer: 'Single-screen blog article.',
+    });
+    expect(r.system).toContain('# Blog Post — single-screen article');
+    expect(r.system).toContain('"masthead"');
+    expect(r.system).toContain('"article-header"');
+    expect(r.system).toContain('"article-body"');
+    expect(r.system).toContain('"related-posts"');
+    expect(r.system).toContain('never <question-form>');
+  });
+
+  it('injects changelog layout contract when skill is changelog', () => {
+    const r = composeSystemPrompt({
+      skill: { id: 'changelog', name: 'Changelog', category: 'web', emoji: '🗒️', blurb: 'Release notes.' },
+      primer: 'Single-screen changelog.',
+    });
+    expect(r.system).toContain('# Changelog — single-screen release notes');
+    expect(r.system).toContain('"changelog-header"');
+    expect(r.system).toContain('"changelog-filters"');
+    expect(r.system).toContain('"changelog-entries"');
+    expect(r.system).toContain('never <question-form>');
+  });
+
   it('injects design system tokens', () => {
     const r = composeSystemPrompt({
       designSystem: { id: 'ember', name: 'Ember', vibe: 'Warm', swatches: [], font: 'Inter' },
@@ -29,27 +77,6 @@ describe('prompt composer', () => {
     });
     expect(r.system).toContain('# Active design system: Ember');
     expect(r.system).toContain('--bg: oklch(0.18 0.02 264);');
-  });
-
-  it('adds web quality bar for web skills', () => {
-    const r = composeSystemPrompt({
-      skill: { id: 'web-prototype', name: 'Web Prototype', category: 'web', emoji: '🌐', blurb: 'Site.' },
-    });
-    expect(r.system).toContain('Web prototype quality bar');
-    expect(r.system).toContain('Do NOT use Tailwind CDN');
-    expect(r.system).toContain('Never emit <question-form>');
-  });
-
-  it('adds pricing quality bar for pricing-page skill', () => {
-    const r = composeSystemPrompt({
-      skill: { id: 'pricing-page', name: 'Pricing Page', category: 'web', emoji: '💵', blurb: 'Plans.' },
-    });
-    expect(r.system).toContain('Pricing page quality bar');
-    expect(r.system).toContain('Never emit <question-form>');
-    expect(r.system).toContain('Free');
-    expect(r.system).toContain('Standard');
-    expect(r.system).toContain('Premium');
-    expect(r.system).not.toContain('Required sections (minimum 6');
   });
 
   it('adds pitch deck quality bar for pitch-deck skill', () => {
@@ -63,7 +90,6 @@ describe('prompt composer', () => {
     expect(r.system).toContain('Go-To-Market');
     expect(r.system).toContain('Financials / Metrics');
     expect(r.system).toContain('Ask / Closing');
-    expect(r.system).not.toContain('Pricing page quality bar');
   });
 
   it('adds all-hands deck quality bar for all-hands-deck skill', () => {
@@ -72,12 +98,10 @@ describe('prompt composer', () => {
     });
     expect(r.system).toContain('All-hands deck quality bar');
     expect(r.system).toContain('Never emit <question-form>');
-    expect(r.system).toContain('data-slide="1"');
     expect(r.system).toContain('Executive Summary');
     expect(r.system).toContain('Wins & Achievements');
     expect(r.system).toContain('Risks & Challenges');
     expect(r.system).toContain('Closing / Q&A');
-    expect(r.system).not.toContain('Pitch deck quality bar');
   });
 
   it('flags direct-generate skills', () => {
@@ -130,6 +154,19 @@ describe('artifact extraction', () => {
     expect(r!.html.startsWith('<!doctype')).toBe(true);
   });
 
+  it('parses artifact tags with attributes (web-prototype contract)', () => {
+    const text = [
+      'Here is your site.',
+      '<artifact identifier="bakery-site" type="text/html" title="Bakery">',
+      '<!doctype html><html><body><div class="ph-img wide">[ Hero ]</div></body></html>',
+      '</artifact>',
+    ].join('\n');
+    const r = extractArtifact(text);
+    expect(r).not.toBeNull();
+    expect(r!.complete).toBe(true);
+    expect(r!.html).toContain('ph-img');
+  });
+
   it('returns null when no artifact tag present', () => {
     expect(extractArtifact('no artifact here')).toBeNull();
   });
@@ -172,24 +209,8 @@ describe('inferPhase', () => {
     expect(inferPhase('<artifact>... lots ...<footer>©', 100)).toBe('Closing the footer…');
   });
 
-  it('detects pricing plan card phase', () => {
-    expect(inferPhase('<artifact><section class="plan-card">', 100)).toBe('Building plan cards…');
-  });
-
-  it('detects FAQ phase', () => {
-    expect(inferPhase('<artifact><details><summary>', 100)).toBe('Writing FAQ…');
-  });
-
-  it('detects pitch deck slide phases', () => {
-    expect(inferPhase('<artifact><main><section data-slide="1">', 100)).toBe('Designing the cover slide…');
-    expect(inferPhase('<artifact>...<section data-slide="9">traction arr', 100)).toBe('Building financials…');
-    expect(inferPhase('<artifact>...ask-box funding', 100)).toBe('Writing the ask slide…');
-  });
-
-  it('detects all-hands deck slide phases', () => {
-    expect(inferPhase('<artifact>...executive summary highlights', 100)).toBe('Writing executive summary…');
-    expect(inferPhase('<artifact>...wins achievement shipped', 100)).toBe('Celebrating wins…');
-    expect(inferPhase('<artifact>...data-slide="10" q&a', 100)).toBe('Closing with Q&A…');
+  it('detects token tuning phase', () => {
+    expect(inferPhase('<artifact><style>:root { --bg: black; }', 100)).toBe('Tuning tokens…');
   });
 });
 
@@ -207,6 +228,72 @@ field:goal | label:Goal | type:textarea
   });
   it('returns null when none', () => {
     expect(extractQuestionForm('blah')).toBeNull();
+  });
+});
+
+describe('conversationForLlm', () => {
+  it('strips artifacts from prior assistant turns', () => {
+    const msgs = [
+      { role: 'user', content: 'Build a blog' },
+      { role: 'assistant', content: 'Done.\n<artifact><html>old</html></artifact>' },
+      { role: 'user', content: 'Make it shorter' },
+    ];
+    const out = conversationForLlm(msgs);
+    expect(out[1].content).not.toContain('<html>');
+    expect(out[1].content).toBe('Done.');
+  });
+
+  it('keeps the latest assistant artifact when continuing', () => {
+    const partial = 'streaming\n<artifact><html>partial';
+    const msgs = [
+      { role: 'user', content: 'Build' },
+      { role: 'assistant', content: partial },
+    ];
+    const out = conversationForLlm(msgs, { keepLastArtifact: true });
+    expect(out[1].content).toBe(partial);
+  });
+
+  it('keeps the latest artifact for revision turns', () => {
+    const msgs = [
+      { role: 'user', content: 'Build' },
+      { role: 'assistant', content: 'Done.\n<artifact><html>v1</html></artifact>' },
+      { role: 'user', content: 'Shorten the hero' },
+    ];
+    const out = conversationForLlm(msgs, { keepLastArtifact: true });
+    expect(out[1].content).toContain('<html>v1</html>');
+  });
+});
+
+describe('brief lock', () => {
+  it('detects locked brief from user message', () => {
+    const conv = [
+      { role: 'user', content: 'Build a dashboard' },
+      { role: 'assistant', content: '<question-form>field:audience | label:Who</question-form>' },
+      { role: 'user', content: 'Brief:\n- Tone: minimal\n- Who is this for?: ops leads' },
+    ];
+    expect(hasLockedBrief(conv)).toBe(true);
+    expect(extractBriefFromConversation(conv)).toMatchObject({
+      locked: 'yes',
+      tone: 'minimal',
+      audience: 'ops leads',
+    });
+  });
+
+  it('does not treat ordinary messages as locked brief', () => {
+    const conv = [
+      { role: 'user', content: 'Build a dashboard for ops leads' },
+      { role: 'assistant', content: '<question-form>field:audience</question-form>' },
+    ];
+    expect(hasLockedBrief(conv)).toBe(false);
+  });
+
+  it('includes locked brief answers in system prompt', () => {
+    const r = composeSystemPrompt({
+      answers: { locked: 'yes', audience: 'ops', tone: 'minimal', scope: 'KPIs + charts' },
+    });
+    expect(r.system).toContain('do NOT re-ask');
+    expect(r.system).toContain('Never emit <question-form>');
+    expect(r.system).toContain('- audience: ops');
   });
 });
 
@@ -354,19 +441,25 @@ describe('composeSystemPrompt signature stability', () => {
       direction: { id: 'd1', name: 'Bold', vibe: 'Strong', swatches: ['#f00'], font: 'Inter', tagline: 'Go bold.' },
       brand: { name: 'Acme', voice: 'warm', audience: 'devs', colors: ['#fff'], fonts: ['Inter'], values: ['speed'], doNots: ['yelling'] },
       answers: { tone: 'minimal', audience: 'designers' },
+      revision: true,
     });
     expect(r).toHaveProperty('system');
     expect(typeof r.system).toBe('string');
+    expect(r.system).toContain('Revision turn');
   });
 
   it('does not export new symbols from src/lib/prompt.ts', async () => {
     const mod = await import('../src/lib/prompt');
     const exportedKeys = Object.keys(mod).sort();
     const expectedExports = [
+      'REVISION_PROMPT_ADDENDUM',
       'composeSystemPrompt',
+      'conversationForLlm',
       'directGenerateKickMessage',
       'extractArtifact',
+      'extractBriefFromConversation',
       'extractQuestionForm',
+      'hasLockedBrief',
       'inferPhase',
       'stripArtifact',
       'usesDirectArtifactGeneration',

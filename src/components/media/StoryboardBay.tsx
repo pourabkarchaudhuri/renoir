@@ -17,7 +17,7 @@ export function StoryboardBay() {
   const jobs = useUI((s) => s.jobs);
   const [script, setScript] = useState('');
   const [styleSuffix, setStyleSuffix] = useState('cinematic, anamorphic 2.39:1, soft volumetric light, restrained palette');
-  const [size, setSize] = useState<'1536x1024' | '1024x1024' | '1024x1536'>('1536x1024');
+  const [size, setSize] = useState<'1024x1024'>('1024x1024');
 
   const shots = script.split('\n').map((l) => l.trim()).filter(Boolean);
 
@@ -77,11 +77,9 @@ export function StoryboardBay() {
           />
         </label>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Frame size</span>
-          <select className="input-base" value={size} onChange={(e) => setSize(e.target.value as any)}>
-            <option value="1536x1024">1536×1024 (cinematic)</option>
+          <span className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Frame size (max 1024×1024)</span>
+          <select className="input-base" value={size} onChange={(e) => setSize(e.target.value as '1024x1024')}>
             <option value="1024x1024">1024×1024 (square)</option>
-            <option value="1024x1536">1024×1536 (portrait)</option>
           </select>
         </label>
         <div className="flex items-end">

@@ -1,10 +1,10 @@
 ---
 name: blog-post
 description: |
-  A long-form article / blog post — masthead, hero image placeholder,
+  Single-screen long-form blog article — masthead, hero image placeholder,
   article body with figures and pull quotes, author byline, related posts.
-  Use when the brief asks for "blog", "article", "post", "essay", or
-  "case study".
+  Use when the brief asks only for "blog", "article", "post", or "essay".
+  For a full linked marketing site, use the SaaS Landing skill instead.
 triggers:
   - "blog"
   - "blog post"
@@ -21,53 +21,34 @@ od:
   featured: 11
   preview:
     type: html
-    entry: index.html
+    entry: example.html
   design_system:
     requires: true
     sections: [color, typography, layout, components]
+  example_prompt: "Filebase engineering blog — why we rewrote our sync engine in Rust. Editorial, first-person voice."
 ---
 
 # Blog Post Skill
 
-Produce a single long-form article page — editorial layout, no chrome.
+Produce a **single-screen long-form article** — the blog screen extract from the SaaS Landing skill.
+
+For a full linked marketing site (landing + changelog + blog), use the **SaaS Landing** skill instead.
 
 ## Workflow
 
-1. **Read the active DESIGN.md** (injected above). Lean into the typography
-   tokens — long-form is 70% type, 20% image, 10% chrome.
-2. **Pick the topic** from the brief and write a real article — at least 600
-   words across 4–6 H2 sections. No lorem ipsum.
-3. **Sections**, in order:
-   - **Masthead** — small wordmark + 4–6 nav links, plain.
-   - **Article header** — category eyebrow, headline (display token, large),
-     deck (1–2 sentence subhead), author name + role + date.
-   - **Hero image** — a 16:9 placeholder block using a DS-tinted gradient or
-     solid fill (no external images). Add a 1-line caption underneath.
-   - **Body** — alternating prose paragraphs with at least:
-     - 1 pull quote (large display type, accent rule on the left).
-     - 1 figure (image placeholder + caption).
-     - 1 list (numbered or bulleted).
-     - 1 inline blockquote.
-   - **Author footer** — author avatar (initials in a circle), bio paragraph.
-   - **Related** — 3 cards linking to other posts. Each card: tiny image
-     block, title, 1-line excerpt, date.
-4. **Write** a single HTML document:
-   - `<!doctype html>` through `</html>`, CSS inline.
-   - Article body uses the DS body font, centered, max-width per DS layout
-     rule (typically 680–720px).
-   - Drop caps (`first-letter`) only if the DS mood is editorial / serif —
-     skip on tech-y DSes.
-   - `data-od-id` on the headline, hero, body, pull quote, related grid.
-5. **Self-check**:
-   - Type hierarchy is unambiguous — H1 is clearly the headline; H2s are
-     section dividers; pull quotes do not compete with H1.
-   - Line length 60–75 chars for body prose.
-   - Accent appears at most twice (eyebrow + pull-quote rule, or one link).
-   - The page reads like a magazine, not a marketing landing.
+1. **Read the active design system** tokens. Long-form is 70% typography, 20% image, 10% chrome.
+2. **Never emit `<question-form>`** — infer topic, angle, and author from the brief.
+3. **Sections**, in order (tag each with `data-od-id`):
+   - **Masthead** (`masthead`) — wordmark + 4–6 nav links.
+   - **Article header** (`article-header`) — category eyebrow, headline, deck, author + date + read time.
+   - **Hero image** (`hero-figure`) — 16:9 placeholder block (DS gradient) + caption.
+   - **Body** (`article-body`) — ~350 words, 4–6 H2 sections, pull quote, blockquote, list, figure.
+   - **Author footer** (`author-footer`) — initials avatar + bio paragraph.
+   - **Related** (`related-posts`) — 3 cards (image block, title, excerpt, date).
+4. **Write** a single HTML document with CSS inline. Body max-width ~680px.
+5. **Self-check**: type hierarchy clear, line length 60–75 chars, accent ≤2×.
 
 ## Output contract
-
-Emit between `<artifact>` tags:
 
 ```
 <artifact identifier="post-slug" type="text/html" title="Article Title">

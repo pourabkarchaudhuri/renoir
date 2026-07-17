@@ -13,7 +13,6 @@ import { Gallery } from '@/views/Gallery';
 import { Settings } from '@/views/Settings';
 import { Media } from '@/views/Media';
 import { AnimatePresence, motion } from 'framer-motion';
-import { loadSession, projectHasSkillWork } from '@/lib/skill-sessions';
 
 export default function App() {
   const route = useUI((s) => s.route);
@@ -22,23 +21,60 @@ export default function App() {
 
   useEffect(() => { void refresh(); }, [refresh]);
 
-  // Restore the most recently active project so context survives a quit/relaunch.
+  // Restore last open study + preview after relaunch.
   useEffect(() => {
     let cancelled = false;
-    void window.renoir.listProjects().then((projects) => {
+    const flush = useStudio.getState().flushProject;
+
+    void (async () => {
+      const { loadWorkspaceSnapshot } = await import('@/lib/workspace-persist');
+      const snap = loadWorkspaceSnapshot();
       if (cancelled) return;
-      if (projects.length && !useStudio.getState().project) {
-        const skill = useStudio.getState().selectedSkillId || projects[0].skillId || 'web-prototype';
-        const match = projects.find((p) => projectHasSkillWork(p, skill));
-        if (match) {
-          useStudio.getState().setProject(loadSession(match, skill));
-          useStudio.getState().setSkill(skill);
-        } else {
-          useStudio.getState().setSkill(skill);
+
+      if (snap.projectId) {
+        const project = await window.renoir.readProject(snap.projectId);
+        if (project) {
+          useStudio.getState().setProject(project);
+          if (snap.skillId && snap.skillId !== project.skillId) {
+            useStudio.getState().setSkill(snap.skillId);
+          }
+          if (snap.route && snap.route !== 'home') {
+            useUI.getState().setRoute(snap.route);
+          }
+          return;
         }
       }
+
+      const projects = await window.renoir.listProjects();
+      if (!cancelled && projects.length && !useStudio.getState().project) {
+        useStudio.getState().setProject(projects[0]);
+      }
+    })();
+
+    const onHide = () => { if (document.visibilityState === 'hidden') void flush(); };
+    const onUnload = () => { void flush(); };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('beforeunload', onUnload);
+
+    const autosave = setInterval(() => { void flush(); }, 20_000);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('beforeunload', onUnload);
+      clearInterval(autosave);
+      void flush();
+    };
+  }, []);
+
+  // Persist workspace before Electron closes the window.
+  useEffect(() => {
+    const off = window.renoir.onFlushRequest(() => {
+      void useStudio.getState().flushProject().finally(() => {
+        void window.renoir.flushDone();
+      });
     });
-    return () => { cancelled = true; };
+    return off;
   }, []);
 
   // Apply theme on root + sync Windows titlebar overlay
@@ -59,7 +95,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="h-screen w-screen flex flex-col overflow-hidden bg-background text-foreground relative">
+    <div className="flex-1 min-h-0 w-full flex flex-col overflow-hidden bg-background text-foreground relative">
       <div className="ambient" />
       <TitleBar />
       <div className="flex-1 flex min-h-0 relative z-10">

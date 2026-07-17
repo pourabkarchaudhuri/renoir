@@ -4,15 +4,18 @@ export interface ByokConfig {
   baseUrl: string;
   model: string;
   hasKey: boolean;
+  keySource?: 'keychain' | 'env' | 'none';
 }
 
 export interface AzureStatus {
   configured: boolean;
+  imageConfigured?: boolean;
   imageDeployment?: string;
   textDeployment?: string;
   audioDeployment?: string;
   videoDeployment?: string;
   endpoint?: string;
+  imageEndpoint?: string;
 }
 
 export interface SkillSummary {
@@ -29,6 +32,7 @@ export interface DesignSystemSummary {
   vibe: string;
   swatches: string[];
   font: string;
+  tokens?: { name: string; value: string }[];
 }
 
 export interface PromptTemplate {
@@ -62,6 +66,10 @@ export interface LintFinding {
   level: 'error' | 'warn' | 'info';
   rule: string;
   message: string;
+  category?: 'structure' | 'forms' | 'images' | 'contrast' | 'keyboard' | 'dashboard';
+  selector?: string;
+  fixable?: boolean;
+  source?: 'static' | 'probe';
 }
 
 export interface LintReport {
@@ -151,6 +159,14 @@ export interface SkillSession {
   conversation: ProjectMessage[];
   versions?: ArtifactVersion[];
   activeVersionId?: string;
+  /** Cached artifact HTML for instant preview restore after relaunch. */
+  previewHtml?: string;
+  /** In-flight generation buffer for this skill (survives skill switches). */
+  pendingAssistant?: string;
+  isStreaming?: boolean;
+  streamStatus?: 'idle' | 'streaming' | 'stalled' | 'retrying';
+  retryNote?: string;
+  conversationId?: string;
 }
 
 export interface ProjectRecord {
@@ -167,7 +183,16 @@ export interface ProjectRecord {
   artifacts: ProjectArtifact[];
   versions?: ArtifactVersion[];
   activeVersionId?: string;
+  /** Per-skill chat + preview state; top-level conversation/versions mirror the active skill. */
   skillSessions?: Record<string, SkillSession>;
+  /** User-defined labels for organizing studies on Home. */
+  tags?: string[];
+  /** Pin to top of project lists. */
+  pinned?: boolean;
+  /** Last active skill (denormalized for filter chips). */
+  lastSkillId?: string;
+  /** Cached brand extraction from conversation brief. */
+  brandSpec?: BrandSpec;
 }
 
 export type ChatStreamEvent =
@@ -187,7 +212,6 @@ export interface RenoirAPI {
   listSkills:           () => Promise<SkillSummary[]>;
   getSkillPrimer:       (id: string) => Promise<string | null>;
   listDesignSystems:    () => Promise<DesignSystemSummary[]>;
-  getDesignSystem:      (id: string) => Promise<{ id: string; name: string; tokens: { name: string; value: string }[] } | null>;
   listPromptTemplates:  () => Promise<PromptTemplate[]>;
   listVisualDirections: () => Promise<VisualDirection[]>;
 
@@ -199,8 +223,12 @@ export interface RenoirAPI {
       attachments?: MessageAttachment[];
     }[];
     temperature?: number;
+    maxTokens?: number;
   }) => Promise<{ ok: boolean; error?: string }>;
   chatCancel: (id: string) => Promise<boolean>;
+  buildMarketingSite: (brief: { productName?: string; tagline?: string }) => Promise<{ ok: boolean; html?: string; error?: string }>;
+  buildBlogPost: (brief: { companyName?: string; headline?: string }) => Promise<{ ok: boolean; html?: string; error?: string }>;
+  buildChangelog: (brief: { productName?: string }) => Promise<{ ok: boolean; html?: string; error?: string }>;
   onChatEvent: (cb: (e: ChatStreamEvent) => void) => () => void;
   chatRoute: () => Promise<{ ready: boolean; source: string; kind: 'anthropic' | 'azure' | 'azure-responses' | 'openai' | 'none' }>;
   themeSet: (t: 'dark' | 'light') => Promise<{ ok: boolean }>;
@@ -237,6 +265,23 @@ export interface RenoirAPI {
     projectId: string; html: string; durationSec: number; fps?: number; width?: number; height?: number;
   }) => Promise<{ ok: boolean; framesDir?: string; videoPath?: string; encoder?: 'ffmpeg' | 'none'; error?: string }>;
 
+  previewRecord: (req: {
+    projectId: string;
+    html: string;
+    mode: 'static' | 'scroll' | 'present';
+    surface?: 'phone' | 'tablet' | 'desktop' | 'ultrawide';
+    durationSec?: number;
+    fps?: number;
+    slideCount?: number;
+  }) => Promise<{
+    ok: boolean;
+    framesDir?: string;
+    videoPath?: string;
+    pngPath?: string;
+    encoder?: 'ffmpeg' | 'none';
+    error?: string;
+  }>;
+
   lintArtifact: (html: string) => Promise<LintReport>;
   brandExtract: (text: string) => Promise<BrandSpec>;
 
@@ -253,6 +298,7 @@ export interface RenoirAPI {
   importProject: () => Promise<{ ok: boolean; project?: ProjectRecord; error?: string }>;
 
   openWorkspace: () => Promise<{ ok: boolean; path: string }>;
+  getWorkspace: () => Promise<{ path: string }>;
   writeArtifact: (req: {
     projectId: string; filename: string; content: string; encoding?: 'utf8' | 'base64';
   }) => Promise<{ ok: boolean; path?: string; error?: string }>;
@@ -280,6 +326,26 @@ export interface RenoirAPI {
     projectId: string; html: string; filename?: string;
   }) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
 
+  exportDocument: (req: {
+    format: 'pdf' | 'docx' | 'markdown';
+    document: {
+      title: string;
+      subtitle?: string;
+      description?: string;
+      skillId?: string;
+      skillName?: string;
+      projectId?: string;
+      createdAt: string;
+      modifiedAt: string;
+      inputs?: { label: string; value: string }[];
+      blocks: unknown[];
+      metadata?: Record<string, string>;
+      previewHtml?: string;
+    };
+    defaultFilename?: string;
+    projectId?: string;
+  }) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
+
   visionDescribe: (req: {
     imageBase64: string; imageMime?: string; prompt?: string; maxTokens?: number;
   }) => Promise<{ ok: boolean; description?: string; error?: string }>;
@@ -300,7 +366,7 @@ export interface RenoirAPI {
     Promise<{ ok: boolean; project?: ProjectRecord; error?: string }>;
   renameProject: (req: { id: string; name: string }) =>
     Promise<{ ok: boolean; project?: ProjectRecord; error?: string }>;
-  addVersion: (req: { id: string; html: string; source?: 'assistant' | 'fork' | 'restore'; note?: string }) =>
+  addVersion: (req: { id: string; html: string; source?: 'assistant' | 'fork' | 'restore'; note?: string; skillId?: string }) =>
     Promise<{ ok: boolean; project?: ProjectRecord; deduped?: boolean; error?: string }>;
   restoreVersion: (req: { id: string; versionId: string }) =>
     Promise<{ ok: boolean; project?: ProjectRecord; error?: string }>;
@@ -322,6 +388,9 @@ export interface RenoirAPI {
   listCustomSystems:  () => Promise<CustomDesignSystem[]>;
   saveCustomSystem:   (rec: CustomDesignSystem) => Promise<CustomDesignSystem>;
   deleteCustomSystem: (id: string) => Promise<{ ok: boolean }>;
+
+  onFlushRequest: (cb: () => void) => () => void;
+  flushDone: () => Promise<{ ok: boolean }>;
 
   platform: NodeJS.Platform;
 }
