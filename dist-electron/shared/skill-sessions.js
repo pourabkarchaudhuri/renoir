@@ -57,13 +57,16 @@ export function skillDisplayName(project, skillId) {
     const session = sessions[skillId];
     if (session?.name?.trim())
         return session.name.trim();
+    if (project.name?.trim())
+        return project.name.trim();
     return 'Untitled';
 }
 export function setSkillSessionName(project, skillId, name) {
+    const trimmed = name.trim();
     const sessions = { ...ensureSkillSessions(project) };
     const session = sessions[skillId] ?? { conversation: [], versions: [] };
-    sessions[skillId] = { ...session, name: name.trim() };
-    return { ...project, skillSessions: sessions };
+    sessions[skillId] = { ...session, name: trimmed };
+    return { ...project, name: trimmed || project.name, skillSessions: sessions };
 }
 /** Drop a session title that was copied from the shared study name on the wrong skill. */
 export function clearInheritedStudyTitle(project, skillId) {

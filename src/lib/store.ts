@@ -11,7 +11,7 @@ import { saveWorkspaceSnapshot } from '@/lib/workspace-persist';
 
 export type Route = 'home' | 'studio' | 'gallery' | 'settings' | 'media';
 
-export type JobKind = 'pdf' | 'pptx' | 'docx' | 'markdown' | 'zip' | 'image' | 'image-edit' | 'audio' | 'video' | 'storyboard' | 'hyperframe';
+export type JobKind = 'pdf' | 'pptx' | 'png' | 'docx' | 'markdown' | 'zip' | 'image' | 'image-edit' | 'audio' | 'video' | 'storyboard' | 'hyperframe';
 
 export interface Job {
   id: string;
@@ -57,7 +57,7 @@ interface UIState {
   }) => void;
   dismissJob: (id: string) => void;
   // legacy alias kept for ExportSnackbar (so older imports still resolve)
-  pushExport: (e: { kind: 'pdf' | 'pptx' | 'docx' | 'markdown' | 'zip'; label: string; params?: Record<string, unknown> }) => string;
+  pushExport: (e: { kind: 'pdf' | 'pptx' | 'png' | 'docx' | 'markdown' | 'zip'; label: string; params?: Record<string, unknown> }) => string;
   updateExport: (id: string, patch: { phase?: string }) => void;
   completeExport: (id: string, patch: { ok: boolean; savedPath?: string; error?: string }) => void;
   chatWidth: number;            // 0–100, percent of the chat+preview row
@@ -611,16 +611,30 @@ export const useStudio = create<StudioState>((set, get) => ({
       const verRes = await window.renoir.addVersion({ id: forSave.id, html, source: 'assistant', skillId });
       if (verRes.ok && verRes.project) {
         project = syncActiveSession(verRes.project, skillId);
-        project = patchSkillSession(project, skillId, {
+      }
+      project = patchSkillSession(project, skillId, {
+        conversation: conv,
+        pendingAssistant: '',
+        isStreaming: false,
+        streamStatus: 'idle',
+        retryNote: undefined,
+        conversationId: undefined,
+        previewHtml: html,
+        ...(verRes.ok && verRes.project
+          ? { versions: getSkillSession(project, skillId).versions }
+          : {}),
+      });
+      if (skillId === viewingSkillId) {
+        project = {
+          ...project,
           conversation: conv,
-          pendingAssistant: '',
-          isStreaming: false,
-          streamStatus: 'idle',
-          retryNote: undefined,
-          conversationId: undefined,
-          versions: getSkillSession(project, skillId).versions,
-          previewHtml: html,
-        });
+          ...(verRes.ok && verRes.project
+            ? {
+              versions: verRes.project.versions,
+              activeVersionId: verRes.project.activeVersionId,
+            }
+            : {}),
+        };
       }
       notifyArtifactImageReady({
         html: art.html,
@@ -635,6 +649,10 @@ export const useStudio = create<StudioState>((set, get) => ({
         : applySession(syncActiveSession(patchSkillSession(project, skillId, { conversation: conv }), skillId), viewingSkillId);
       await window.renoir.saveProject(forSave);
       project = forSave;
+    }
+
+    if (skillId === viewingSkillId && project.conversation !== conv) {
+      project = { ...project, conversation: conv };
     }
 
     if (skillId !== viewingSkillId) project = applySession(project, viewingSkillId);

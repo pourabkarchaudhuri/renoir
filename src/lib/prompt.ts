@@ -7,6 +7,7 @@ import { changelogPromptLines } from '@shared/changelog-layout';
 import { marketingSitePromptLines } from '@shared/marketing-site-layout';
 import { FAST_PATH_SKILL_IDS } from '@shared/generation-budgets';
 import { productDeckPromptLines } from '@/lib/product-deck-content';
+import { productDeckLayoutPromptLines } from '@shared/product-deck-layout';
 
 export interface PromptComposition {
   system: string;
@@ -355,6 +356,8 @@ export function composeSystemPrompt(opts: {
   if (opts.skill?.id === 'product-deck') {
     lines.push('');
     lines.push(...productDeckPromptLines());
+    lines.push('');
+    lines.push(...productDeckLayoutPromptLines());
   }
 
   if (opts.skill?.id === 'saas-landing') {

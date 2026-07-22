@@ -9,6 +9,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { existsSync } from 'node:fs';
 import { projectDir as getProjectDir } from './workspace.js';
+import { loadHtmlIntoWindow } from './load-html.js';
 function whichSync(bin) {
     const isWin = process.platform === 'win32';
     const exts = isWin ? (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';') : [''];
@@ -47,7 +48,7 @@ export async function renderHyperFrames(req) {
         },
     });
     try {
-        await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(req.html));
+        await loadHtmlIntoWindow(win, req.html);
         // Allow the page to settle before capture.
         await new Promise((r) => setTimeout(r, 250));
         for (let i = 0; i < total; i++) {

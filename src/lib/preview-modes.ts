@@ -4,75 +4,22 @@
 import { MOBILE_SIDEBAR_BRIDGE_FN } from './preview-mobile-sidebar';
 import { DASHBOARD_BRIDGE_FN } from '@shared/dashboard-layout';
 import { DECK_CONTRAST_BRIDGE_FN, countDeckSlides } from './preview-deck-contrast';
+import { DECK_FIT_BRIDGE_FN } from './preview-deck-fit';
 import { PICK_BRIDGE_FN } from './preview-pick-bridge';
 import { SCROLL_SYNC_BRIDGE_FN } from './preview-scroll-sync';
 import { A11Y_PROBE_BRIDGE_FN } from './preview-a11y-probe';
 import { FLOW_BRIDGE_FN } from './preview-flow-bridge';
+import {
+  MERMAID_CDN,
+  MERMAID_INIT_SCRIPT,
+  hasMermaidContent,
+  injectMermaidScript,
+  wrapWithBridge as wrapWithBridgeBase,
+} from '@shared/preview-nav-bridge';
 
-export { countDeckSlides };
+export { countDeckSlides, MERMAID_CDN, MERMAID_INIT_SCRIPT, hasMermaidContent, injectMermaidScript };
 
 export type PreviewMode = 'scroll' | 'present';
-
-/** CDN URL for the Mermaid library injected into artifact iframes. */
-export const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js';
-
-/** Initialization script that configures and runs Mermaid in the artifact iframe. */
-export const MERMAID_INIT_SCRIPT = `<script>
-(function () {
-  var mermaidReady = null;
-  function ensureMermaid() {
-    if (typeof mermaid !== 'undefined') return Promise.resolve(mermaid);
-    if (mermaidReady) return mermaidReady;
-    mermaidReady = new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      s.src = '${MERMAID_CDN}';
-      s.onload = function () { resolve(window.mermaid); };
-      s.onerror = reject;
-      document.head.appendChild(s);
-    });
-    return mermaidReady;
-  }
-  function hydrateMermaidPlaceholders() {
-    document.querySelectorAll('.mermaid-placeholder[data-mermaid-src]').forEach(function (el) {
-      try {
-        var src = atob(el.getAttribute('data-mermaid-src') || '');
-        var pre = document.createElement('pre');
-        pre.className = 'mermaid';
-        pre.setAttribute('data-renoir-mermaid-src', src);
-        pre.textContent = src;
-        el.replaceWith(pre);
-      } catch (e) { /* swallow */ }
-    });
-  }
-  function getMermaidSource(el) {
-    var src = el.getAttribute('data-renoir-mermaid-src');
-    if (!src) {
-      src = (el.textContent || '').trim();
-      if (src) el.setAttribute('data-renoir-mermaid-src', src);
-    }
-    return src || '';
-  }
-  window.__renoirRunMermaid = function () {
-    return ensureMermaid().then(function (mm) {
-      hydrateMermaidPlaceholders();
-      mm.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'strict' });
-      var nodes = Array.prototype.slice.call(document.querySelectorAll('.mermaid'));
-      if (!nodes.length) return;
-      return Promise.all(nodes.map(function (el, i) {
-        var src = getMermaidSource(el);
-        if (!src) return Promise.resolve();
-        var id = 'renoir-m-' + i + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
-        return mm.render(id, src).then(function (out) {
-          el.innerHTML = out.svg;
-          el.setAttribute('data-renoir-mermaid-src', src);
-        }).catch(function () {
-          el.textContent = src;
-        });
-      }));
-    });
-  };
-})();
-</script>`;
 
 const SKILL_TO_MODE: Record<string, PreviewMode> = {
   // Decks → slide presentation (one slide at a time)
@@ -100,6 +47,7 @@ export const NAV_BRIDGE = `
 ${MOBILE_SIDEBAR_BRIDGE_FN}
 ${DASHBOARD_BRIDGE_FN}
 ${DECK_CONTRAST_BRIDGE_FN}
+${DECK_FIT_BRIDGE_FN}
 ${PICK_BRIDGE_FN}
 ${SCROLL_SYNC_BRIDGE_FN}
 ${A11Y_PROBE_BRIDGE_FN}
@@ -261,17 +209,33 @@ ${FLOW_BRIDGE_FN}
         'opacity:1!important;visibility:visible!important;pointer-events:auto!important;' +
         'transform:none!important;z-index:2!important;' +
         'display:flex!important;flex-direction:column!important;' +
-        'width:100%!important;height:100%!important;min-height:100%!important;' +
-        'overflow:auto!important;box-sizing:border-box!important;' +
+        'position:absolute!important;inset:0!important;' +
+        'width:100%!important;height:100%!important;min-height:0!important;max-width:100%!important;max-height:100%!important;' +
+        'overflow:hidden!important;box-sizing:border-box!important;' +
+        'justify-content:flex-start!important;align-items:stretch!important;' +
+        'padding:var(--renoir-chrome-top,40px) 48px var(--renoir-chrome-bottom,48px)!important;' +
+      '}' +
+      'body[data-renoir-mode="present"] .renoir-footer-fixed{' +
+        'position:absolute!important;left:48px!important;right:48px!important;bottom:12px!important;margin:0!important;' +
+      '}' +
+      'body[data-renoir-mode="present"] .grid.g3{' +
+        'grid-template-columns:repeat(3,minmax(0,1fr))!important;' +
+      '}' +
+      'body[data-renoir-mode="present"] .grid.g2{' +
+        'grid-template-columns:repeat(2,minmax(0,1fr))!important;' +
+      '}' +
+      'body[data-renoir-mode="present"] .grid>*{min-width:0!important;max-width:100%!important;}' +
+      '@media(max-width:480px){' +
+        'body[data-renoir-mode="present"] .grid.g3,body[data-renoir-mode="present"] .grid.g2{' +
+          'grid-template-columns:1fr!important;' +
+        '}' +
       '}';
     document.body.setAttribute('data-renoir-mode', 'present');
     resetScroller();
     list.forEach(function (el, i) {
       el.classList.add(SLIDE_CLASS);
       el.dataset.renoirOwned = '1';
-      el.style.transform = '';
-      el.style.left = '';
-      el.style.top = '';
+      pinPresentSlide(el);
       if (i === idx) {
         el.classList.add('is-active');
         el.removeAttribute('hidden');
@@ -287,6 +251,7 @@ ${FLOW_BRIDGE_FN}
         el.removeAttribute('data-renoir-active');
       }
     });
+    scheduleFitActiveSlide();
   }
   function applyScroll() {
     var st = ensureStyle();
@@ -381,12 +346,14 @@ ${FLOW_BRIDGE_FN}
       vp.setAttribute('content', 'width=' + vw + ', initial-scale=1');
       applyMobileSidebar(vw);
       applyDashboardContainment();
+      scheduleFitActiveSlide();
       reportSize();
       rerenderCharts();
     } else if (d.type === 'renoir:reload') {
       focus(activeIdx, activeMode);
       applyMobileSidebar(currentViewportWidth());
       applyDashboardContainment();
+      scheduleFitActiveSlide();
       rerenderCharts();
       reportSize();
     } else if (d.type === 'renoir:pick-enable') {
@@ -446,56 +413,7 @@ ${FLOW_BRIDGE_FN}
 })();
 </script>`;
 
-/**
- * Checks whether the given HTML contains mermaid content markers.
- * Looks for class="mermaid", class='mermaid', or pre class="mermaid".
- */
-export function hasMermaidContent(html: string): boolean {
-  return (
-    html.includes('class="mermaid"') ||
-    html.includes("class='mermaid'") ||
-    html.includes('pre class="mermaid"') ||
-    html.includes('mermaid-placeholder') ||
-    html.includes('data-mermaid-src')
-  );
-}
-
-/**
- * Conditionally injects the Mermaid CDN script and initialization code into HTML.
- * - Skips injection if mermaid is already present (mermaid.min.js or mermaid.esm)
- * - Skips injection if no mermaid content markers are found
- * - Injects before </head> if present, else before </body>, else appends at end
- */
-export function injectMermaidScript(html: string): string {
-  // Idempotency: skip if mermaid is already present
-  if (html.includes('mermaid.min.js') || html.includes('mermaid.esm')) {
-    return html;
-  }
-
-  // Only inject if the HTML contains mermaid content
-  if (!hasMermaidContent(html)) {
-    return html;
-  }
-
-  // Inject before </head> if present, else before </body>, else append at end
-  if (/<\/head>/i.test(html)) {
-    return html.replace(/<\/head>/i, `${MERMAID_INIT_SCRIPT}\n</head>`);
-  }
-  if (/<\/body>/i.test(html)) {
-    return html.replace(/<\/body>/i, `${MERMAID_INIT_SCRIPT}\n</body>`);
-  }
-  return html + '\n' + MERMAID_INIT_SCRIPT;
-}
-
-/** Wrap an artifact body with the nav bridge; idempotent if already wrapped. */
+/** Wrap an artifact body with the full preview nav bridge; idempotent if already wrapped. */
 export function wrapWithBridge(html: string): string {
-  if (html.includes('id="__renoir_mode_style"') || html.includes('renoir:nav-state')) return html;
-
-  // Inject mermaid support BEFORE the nav bridge
-  let result = injectMermaidScript(html);
-
-  // Inject nav bridge before </body> if present, otherwise at the end.
-  if (/<\/body>/i.test(result)) return result.replace(/<\/body>/i, `${NAV_BRIDGE}</body>`);
-  if (/<\/html>/i.test(result)) return result.replace(/<\/html>/i, `${NAV_BRIDGE}</html>`);
-  return result + NAV_BRIDGE;
+  return wrapWithBridgeBase(html, NAV_BRIDGE);
 }

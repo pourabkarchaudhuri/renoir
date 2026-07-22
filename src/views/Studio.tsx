@@ -398,21 +398,33 @@ export function Studio() {
     void sendUserMessage(lastUser.content);
   };
 
-  const lastAssistant = project?.conversation.findLast((m) => m.role === 'assistant');
+  const skillConversation = useMemo(() => {
+    if (!project) return [];
+    const sess = getSkillSession(project, selectedSkillId);
+    return sess.conversation?.length ? sess.conversation : (project.conversation ?? []);
+  }, [project, selectedSkillId]);
+
+  const lastAssistant = skillConversation.findLast((m) => m.role === 'assistant');
   const liveExtracted = isStreaming ? extractArtifact(pendingAssistant) : null;
   const activeVersion = project?.activeVersionId
     ? project.versions?.find((v) => v.id === project.activeVersionId)
     : null;
 
   // Only render complete artifacts — partial HTML in a scaled iframe looks squashed/broken.
-  const lastUserIdx = project?.conversation.findLastIndex((m) => m.role === 'user') ?? -1;
-  const lastAssistantIdx = project?.conversation.findLastIndex((m) => m.role === 'assistant') ?? -1;
+  const lastUserIdx = skillConversation.findLastIndex((m) => m.role === 'user') ?? -1;
+  const lastAssistantIdx = skillConversation.findLastIndex((m) => m.role === 'assistant') ?? -1;
   const awaitingNewArtifact = Boolean(project && lastUserIdx > lastAssistantIdx);
   // During revision, keep the living document until the new complete artifact streams in.
   const holdRevisionPreview = isRevising && awaitingNewArtifact && !liveExtracted?.complete;
 
   const completeArtifactHtml = useMemo(() => {
     if (liveExtracted?.complete) return liveExtracted.html;
+
+    // Persisted preview from finishStreaming / image skip — use even if top-level conversation lags.
+    if (!isStreaming && project) {
+      const cached = getSkillSession(project, selectedSkillId).previewHtml?.trim();
+      if (cached) return cached;
+    }
 
     // Post-processed HTML (generated images, lint fixes) wins over the raw conversation artifact.
     // Also keep it during revision turns so the preview never blanks.
@@ -520,7 +532,20 @@ export function Studio() {
         }}
         onCancel={() => {
           const deferred = deferredLintRef.current;
+          const prompt = imageGenPrompt;
           setImageGenPrompt(null);
+          if (prompt) {
+            const st = useStudio.getState();
+            if (st.project) {
+              let next = patchSkillSession(st.project, prompt.skillId, {
+                previewHtml: prompt.html,
+              });
+              if (prompt.skillId === st.selectedSkillId) {
+                next = { ...next, conversation: getSkillSession(next, prompt.skillId).conversation ?? next.conversation };
+              }
+              useStudio.getState().setProject(next);
+            }
+          }
           if (deferred) {
             deferredLintRef.current = null;
             void maybePersistLintFixes(deferred.html, deferred.projectId, deferred.skillId, { skip: FAST_PATH_SKILL_IDS.has(deferred.skillId ?? '') });

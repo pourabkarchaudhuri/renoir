@@ -5,6 +5,8 @@ export interface SkillSession {
   conversation: ProjectMessage[];
   versions?: ArtifactVersion[];
   activeVersionId?: string;
+  /** Display name for this skill's workspace within the study. */
+  name?: string;
   previewHtml?: string;
   pendingAssistant?: string;
   isStreaming?: boolean;
@@ -46,6 +48,7 @@ export function ensureSkillSessions(project: ProjectRecord): ProjectRecord {
 
   if (hasTopData && storedEmpty) {
     sessions[key] = {
+      ...existing,
       conversation: project.conversation ?? [],
       versions: project.versions,
       activeVersionId: project.activeVersionId,
@@ -53,6 +56,7 @@ export function ensureSkillSessions(project: ProjectRecord): ProjectRecord {
         conversation: project.conversation ?? [],
         versions: project.versions,
         activeVersionId: project.activeVersionId,
+        previewHtml: existing?.previewHtml,
       }),
     };
     return { ...project, skillSessions: sessions };
@@ -135,6 +139,7 @@ export function syncActiveSession(
   const prev = migrated.skillSessions?.[key];
   const sessions = { ...migrated.skillSessions };
   sessions[key] = {
+    ...prev,
     conversation: project.conversation ?? [],
     versions: project.versions,
     activeVersionId: project.activeVersionId,
@@ -221,6 +226,7 @@ export function switchSkillSession(
   const sessions = { ...migrated.skillSessions };
   const prevFrom = sessions[fromKey];
   sessions[fromKey] = {
+    ...prevFrom,
     conversation: project.conversation ?? [],
     versions: project.versions,
     activeVersionId: project.activeVersionId,

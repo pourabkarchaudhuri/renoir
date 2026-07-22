@@ -31,6 +31,8 @@ describe('prompt composer', () => {
     expect(r.system).toContain('# Product Deck requirements');
     expect(r.system).toContain('slide-visual');
     expect(r.system).toContain('12 slides');
+    expect(r.system).toContain('# Product Deck layout (Renoir-injected CSS)');
+    expect(r.system).toContain('do NOT redefine .deck/.slide positioning');
   });
 
   it('injects marketing site layout contract when skill is saas-landing', () => {

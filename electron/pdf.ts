@@ -5,6 +5,7 @@ import { BrowserWindow } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { ensureProjectDir } from './workspace.js';
+import { loadHtmlIntoWindow } from './load-html.js';
 
 export interface PdfRequest {
   projectId: string;
@@ -24,7 +25,7 @@ export async function exportArtifactToPdf(req: PdfRequest): Promise<PdfResult> {
     webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false },
   });
   try {
-    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(req.html));
+    await loadHtmlIntoWindow(win, req.html);
     await new Promise((r) => setTimeout(r, 400));
     const buf = await win.webContents.printToPDF({
       pageSize:    req.pageSize ?? 'A4',

@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { useUI, useStudio, useCatalog } from '@/lib/store';
+import type { JobKind } from '@/lib/store';
 import {
   buildSkillExportDocument,
   defaultExportFilename,
@@ -12,7 +13,17 @@ const FORMAT_LABEL: Record<ExportFormat, string> = {
   pdf: 'Exporting PDF',
   docx: 'Exporting Word document',
   markdown: 'Exporting Markdown',
+  pptx: 'Exporting PowerPoint',
+  png: 'Exporting PNG',
 };
+
+function jobKindForFormat(format: ExportFormat): JobKind {
+  if (format === 'markdown') return 'markdown';
+  if (format === 'docx') return 'docx';
+  if (format === 'pptx') return 'pptx';
+  if (format === 'png') return 'png';
+  return 'pdf';
+}
 
 export function useSkillExport(skillId: string | undefined, streaming = false) {
   const project = useStudio((s) => s.project);
@@ -39,7 +50,7 @@ export function useSkillExport(skillId: string | undefined, streaming = false) {
     let document = retryParams?.document as ExportDocument | undefined;
     let defaultFilename = retryParams?.defaultFilename as string | undefined;
 
-    const jobKind = format === 'markdown' ? 'markdown' : format === 'docx' ? 'docx' : 'pdf';
+    const jobKind = jobKindForFormat(format);
     const jobId = useUI.getState().pushJob({
       kind: jobKind,
       label: FORMAT_LABEL[format],

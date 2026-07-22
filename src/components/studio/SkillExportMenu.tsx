@@ -1,14 +1,18 @@
-import { FileDown, FileText, FileType } from 'lucide-react';
+import { FileDown, FileText, FileType, Presentation, Image as ImageIcon } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { cn } from '@/lib/cn';
 import type { ExportFormat } from '@shared/export/types';
+import { EXPORT_FORMAT_LABELS } from '@shared/export/types';
+import { exportFormatsForSkill } from '@/lib/skill-export';
 import { useSkillExport } from '@/lib/use-skill-export';
 
-const FORMATS: { format: ExportFormat; label: string; icon: typeof FileText }[] = [
-  { format: 'pdf', label: 'PDF', icon: FileText },
-  { format: 'docx', label: 'Word (.docx)', icon: FileType },
-  { format: 'markdown', label: 'Markdown (.md)', icon: FileDown },
-];
+const FORMAT_ICONS: Record<ExportFormat, typeof FileText> = {
+  pdf: FileText,
+  docx: FileType,
+  markdown: FileDown,
+  pptx: Presentation,
+  png: ImageIcon,
+};
 
 export function SkillExportMenu({
   skillId,
@@ -18,6 +22,7 @@ export function SkillExportMenu({
   streaming?: boolean;
 }) {
   const { canExport, exportSkill } = useSkillExport(skillId, streaming);
+  const formats = exportFormatsForSkill(skillId);
 
   return (
     <DropdownMenu.Root>
@@ -41,16 +46,28 @@ export function SkillExportMenu({
           sideOffset={6}
           align="end"
         >
-          {FORMATS.map(({ format, label, icon: Icon }) => (
-            <DropdownMenu.Item
-              key={format}
-              className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] rounded-md cursor-pointer outline-none hover:bg-accent focus:bg-accent"
-              onSelect={() => { void exportSkill(format); }}
-            >
-              <Icon className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.6} />
-              {label}
-            </DropdownMenu.Item>
-          ))}
+          {formats.map((format) => {
+            const Icon = FORMAT_ICONS[format];
+            const label = format === 'docx'
+              ? 'Word (.docx)'
+              : format === 'markdown'
+                ? 'Markdown (.md)'
+                : format === 'pptx'
+                  ? 'PowerPoint (.pptx)'
+                  : format === 'png'
+                    ? 'PNG (.png)'
+                    : EXPORT_FORMAT_LABELS[format];
+            return (
+              <DropdownMenu.Item
+                key={format}
+                className="flex items-center gap-2 px-2.5 py-1.5 text-[12px] rounded-md cursor-pointer outline-none hover:bg-accent focus:bg-accent"
+                onSelect={() => { void exportSkill(format); }}
+              >
+                <Icon className="h-3.5 w-3.5 text-muted-foreground" strokeWidth={1.6} />
+                {label}
+              </DropdownMenu.Item>
+            );
+          })}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

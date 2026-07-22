@@ -114,6 +114,23 @@ describe('skill-sessions', () => {
     expect(previewHtmlForSkill(hydrated, 'dashboard')).toBe('<html>saved</html>');
   });
 
+  it('previewHtmlForSkill returns session previewHtml when top-level conversation lags', () => {
+    const project = baseProject({
+      skillId: 'product-deck',
+      conversation: [{ role: 'user', content: 'Brief: build deck', ts: '2026-01-02' }],
+      skillSessions: {
+        'product-deck': {
+          conversation: [
+            { role: 'user', content: 'Brief: build deck', ts: '2026-01-02' },
+            { role: 'assistant', content: '<artifact><html>deck</html></artifact>', ts: '2026-01-02' },
+          ],
+          previewHtml: '<html>deck</html>',
+        },
+      },
+    });
+    expect(previewHtmlForSkill(project, 'product-deck')).toBe('<html>deck</html>');
+  });
+
   it('switchSkillSession preserves background stream state', () => {
     const project = baseProject({
       skillId: 'dashboard',
@@ -141,5 +158,43 @@ describe('skill-sessions', () => {
     expect(dashView.isStreaming).toBe(true);
     const protoView = streamStateForSkill(getSkillSession(onProto, 'prototype'), false);
     expect(protoView.isStreaming).toBe(false);
+  });
+
+  it('preserves session display name across sync and skill switch', () => {
+    const project = baseProject({
+      skillId: 'dashboard',
+      name: 'Study title',
+      conversation: [{ role: 'user', content: 'hi', ts: '2026-01-01' }],
+      skillSessions: {
+        dashboard: {
+          conversation: [{ role: 'user', content: 'hi', ts: '2026-01-01' }],
+          name: 'Renamed study',
+        },
+      },
+    });
+
+    const synced = syncActiveSession(
+      {
+        ...project,
+        conversation: [
+          ...project.conversation,
+          { role: 'assistant', content: 'ok', ts: '2026-01-02' },
+        ],
+      },
+      'dashboard',
+    );
+    expect(synced.skillSessions?.dashboard?.name).toBe('Renamed study');
+
+    const switched = switchSkillSession(synced, 'dashboard', 'prototype');
+    expect(switched.skillSessions?.dashboard?.name).toBe('Renamed study');
+  });
+
+  it('setSkillSessionName updates study name and skillDisplayName', async () => {
+    const { setSkillSessionName, skillDisplayName } = await import('../shared/skill-sessions');
+    const project = baseProject({ name: 'Old', skillId: 'dashboard' });
+    const renamed = setSkillSessionName(project, 'dashboard', 'New study');
+    expect(renamed.name).toBe('New study');
+    expect(renamed.skillSessions?.dashboard?.name).toBe('New study');
+    expect(skillDisplayName(renamed, 'dashboard')).toBe('New study');
   });
 });

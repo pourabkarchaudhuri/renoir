@@ -22,7 +22,7 @@ import {
   previewSurfacesForSkill,
   type PreviewSurface,
 } from '@/lib/preview-surfaces';
-import { normalizeArtifactDocument } from '@/lib/artifact-html';
+import { normalizeArtifactDocument, stripNonInteractiveButtonsForPreview } from '@/lib/artifact-html';
 import { repairArtifactIfNeeded } from '@/lib/artifact-repair';
 import { applySession, getSkillSession, patchSkillSession } from '@/lib/skill-sessions';
 import { DevicePreviewFrame } from './DevicePreviewFrame';
@@ -112,14 +112,17 @@ export function PreviewPane({
 
   const srcDocsBySurface = useMemo(() => {
     if (!artifact) return null;
-    const normalized = normalizeArtifactDocument(artifact, {
-      title: docTitle,
-      theme: artifactTheme,
-      dashboard: skillId === 'dashboard',
-      productDeck: skillId === 'product-deck',
-      productName: docTitle,
-      productDeckFinalize: !streaming,
-    });
+    const normalized = stripNonInteractiveButtonsForPreview(
+      normalizeArtifactDocument(artifact, {
+        title: docTitle,
+        theme: artifactTheme,
+        dashboard: skillId === 'dashboard',
+        productDeck: skillId === 'product-deck',
+        productName: docTitle,
+        productDeckFinalize: !streaming,
+      }),
+      skillId,
+    );
     const out = {} as Record<PreviewSurface, string>;
     for (const id of activeSurfaces) {
       const viewportW = PREVIEW_SURFACES[id].w;
@@ -144,15 +147,18 @@ export function PreviewPane({
   const activeSrcDoc = srcDocsBySurface?.[surface] ?? null;
   const baseHtml = useMemo(() => {
     if (!artifact) return null;
-    return normalizeArtifactDocument(artifact, {
-      title: docTitle,
-      viewportWidth: PREVIEW_SURFACES[surface].w,
-      theme: artifactTheme,
-      dashboard: skillId === 'dashboard',
-      productDeck: skillId === 'product-deck',
-      productName: docTitle,
-      productDeckFinalize: !streaming,
-    });
+    return stripNonInteractiveButtonsForPreview(
+      normalizeArtifactDocument(artifact, {
+        title: docTitle,
+        viewportWidth: PREVIEW_SURFACES[surface].w,
+        theme: artifactTheme,
+        dashboard: skillId === 'dashboard',
+        productDeck: skillId === 'product-deck',
+        productName: docTitle,
+        productDeckFinalize: !streaming,
+      }),
+      skillId,
+    );
   }, [artifact, surface, docTitle, artifactTheme, skillId, streaming]);
 
   // Listen for nav-state messages from the iframe bridge.
@@ -360,7 +366,10 @@ export function PreviewPane({
     const id = useUI.getState().pushExport({ kind: 'pptx', label: 'Exporting PPTX' });
     try {
       useUI.getState().updateExport(id, { phase: 'capturing slides…' });
-      const res = await window.renoir.exportPptx({ projectId: project.id, html: baseHtml! });
+      const res = await window.renoir.exportPptx({
+        projectId: project.id,
+        html: wrapWithBridge(baseHtml!),
+      });
       if (res.ok) useUI.getState().completeExport(id, { savedPath: res.savedPath, ok: true });
       else useUI.getState().completeExport(id, { ok: false, error: res.error });
     } catch (err: any) {

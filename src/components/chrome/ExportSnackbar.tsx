@@ -12,6 +12,7 @@ import type { ExportFormat } from '@shared/export/types';
 const KIND_ICON: Record<string, typeof FileText> = {
   pdf:         FileText,
   pptx:        Presentation,
+  png:         ImageIcon,
   docx:        FileType,
   markdown:    FileDown,
   zip:         Package,
@@ -46,8 +47,17 @@ async function retryExportJob(job: Job): Promise<void> {
   const params = job.params;
   if (!params?.document || !params?.format) return;
   const format = params.format as ExportFormat;
+  const jobKind = format === 'markdown'
+    ? 'markdown'
+    : format === 'docx'
+      ? 'docx'
+      : format === 'pptx'
+        ? 'pptx'
+        : format === 'png'
+          ? 'png'
+          : 'pdf';
   const jobId = useUI.getState().pushJob({
-    kind: format === 'markdown' ? 'markdown' : format === 'docx' ? 'docx' : 'pdf',
+    kind: jobKind,
     label: job.label,
     params,
   });

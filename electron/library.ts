@@ -140,7 +140,7 @@ const skills: SkillRecord[] = [
   {
     id: 'product-deck', name: 'Product Deck', category: 'deck', emoji: '📽️',
     blurb: '12-slide product walkthrough.',
-    primer: '12 slides: cover, why-now, pain, product map, 4 features, integrations, security, pricing, contact. Rich copy — 2+ sentence lede and 3 bullets or 3 cards per slide. Cover, map, and feature slides need empty <img src="" alt="…" class="slide-image"> in .slide-visual (auto-filled). Display typography, gradient orbs on cover, staggered entrance animation, elevation-1 cards. Realistic product names and metrics. Dark/light theme tokens.',
+    primer: '12 slides: cover, why-now, pain, product map, 4 features, integrations, security, pricing, contact. Rich copy — 2+ sentence lede and 3 bullets or 3 cards per slide. Cover, map, and feature slides need empty <img src="" alt="…" class="slide-image"> in .slide-visual (auto-filled). Use Renoir-injected deck layout classes (.deck > section.slide, .kicker, .h2, .feature-card). Display typography, gradient orbs on cover, staggered entrance animation. Realistic product names and metrics. Dark/light theme tokens.',
     questions: Q_BASE,
   },
   {
