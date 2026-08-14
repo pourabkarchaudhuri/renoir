@@ -3,7 +3,7 @@ import {
   buildDefaultExportDocument,
   type SkillExportBuildInput,
 } from '@shared/export/skill-content';
-import type { ExportDocument } from '@shared/export/types';
+import type { ExportDocument, ExportFormat } from '@shared/export/types';
 import { normalizeArtifactDocument } from '@/lib/artifact-html';
 import { extractBriefFromConversation } from '@/lib/prompt';
 import {
@@ -15,6 +15,12 @@ import {
 import type { ProjectRecord } from '@/types/global';
 import type { ThemeStyleOptions } from '@/lib/theme-tokens';
 import { getSkillExportProvider } from '@/lib/skill-export-providers';
+import {
+  applyCaptureProfileToDocument,
+  exportFormatsForSkill,
+} from '@/lib/skill-export-capture';
+
+export { exportFormatsForSkill, isDeckSkill } from '@/lib/skill-export-capture';
 
 export interface BuildSkillExportOptions {
   project: ProjectRecord;
@@ -58,8 +64,9 @@ export function buildSkillExportDocument(opts: BuildSkillExportOptions): ExportD
     throw new Error('No exportable content for this skill.');
   }
 
+  const title = skillDisplayName(project, skillId) || project.name || skillName;
   const normalized = normalizeArtifactDocument(artifactHtml, {
-    title: skillDisplayName(project, skillId) || project.name || skillName,
+    title,
     theme,
     dashboard: skillId === 'dashboard',
     productDeck: skillId === 'product-deck',
@@ -80,7 +87,7 @@ export function buildSkillExportDocument(opts: BuildSkillExportOptions): ExportD
     skillBlurb,
     projectId: project.id,
     projectName: project.name,
-    sessionName: skillDisplayName(project, skillId),
+    sessionName: title,
     artifactHtml: normalized,
     briefAnswers: Object.keys(briefAnswers).length ? briefAnswers : undefined,
     createdAt,
@@ -91,19 +98,26 @@ export function buildSkillExportDocument(opts: BuildSkillExportOptions): ExportD
   const provider = getSkillExportProvider(skillId);
   if (provider) {
     return Promise.resolve(provider.buildDocument(input, (html) => parseHtmlToBlocks(html, input.pageBreakBetweenSlides)))
-      .then((doc) => ({ previewHtml: normalized, ...doc }));
+      .then((doc) => {
+        applyCaptureProfileToDocument(doc, skillId, normalized, project.name);
+        return { previewHtml: normalized, ...doc };
+      });
   }
 
-  const blocks = parseHtmlToBlocks(normalized, input.pageBreakBetweenSlides);
+  const formats = exportFormatsForSkill(skillId);
+  const needsBlocks = formats.includes('docx') || formats.includes('markdown');
+  const blocks = needsBlocks
+    ? parseHtmlToBlocks(normalized, input.pageBreakBetweenSlides)
+    : [];
   const doc = buildDefaultExportDocument(input, blocks);
-  doc.previewHtml = normalized;
+  applyCaptureProfileToDocument(doc, skillId, normalized, project.name);
   return doc;
 }
 
 export function defaultExportFilename(
   skillName: string,
   projectName: string,
-  format: 'pdf' | 'docx' | 'markdown',
+  format: ExportFormat,
 ): string {
   const ext = format === 'markdown' ? 'md' : format;
   const date = new Date().toISOString().slice(0, 10);

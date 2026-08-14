@@ -159,6 +159,8 @@ export interface SkillSession {
   conversation: ProjectMessage[];
   versions?: ArtifactVersion[];
   activeVersionId?: string;
+  /** Display name for this skill's workspace within the study. */
+  name?: string;
   /** Cached artifact HTML for instant preview restore after relaunch. */
   previewHtml?: string;
   /** In-flight generation buffer for this skill (survives skill switches). */
@@ -327,7 +329,7 @@ export interface RenoirAPI {
   }) => Promise<{ ok: boolean; savedPath?: string; error?: string }>;
 
   exportDocument: (req: {
-    format: 'pdf' | 'docx' | 'markdown';
+    format: 'pdf' | 'docx' | 'markdown' | 'pptx' | 'png';
     document: {
       title: string;
       subtitle?: string;
@@ -341,6 +343,13 @@ export interface RenoirAPI {
       blocks: unknown[];
       metadata?: Record<string, string>;
       previewHtml?: string;
+      captureHtml?: string;
+      slideCount?: number;
+      rasterExport?: boolean;
+      captureMode?: 'present' | 'fullpage' | 'viewport';
+      captureWidth?: number;
+      captureHeight?: number;
+      surface?: 'phone' | 'tablet' | 'desktop' | 'ultrawide';
     };
     defaultFilename?: string;
     projectId?: string;

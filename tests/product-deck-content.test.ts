@@ -99,4 +99,51 @@ describe('product-deck-content', () => {
     const lede = out.match(/<p class="lede[^"]*">([^<]+)<\/p>/i)?.[1] ?? '';
     expect(lede.length).toBeGreaterThan(40);
   });
+
+  it('rebuilds decks with nested feature cards without orphaning slides', () => {
+    const nestedSlide = (title: string, body: string) =>
+      slide(
+        `<p class="kicker">${title}</p><h2 class="h2">${title}</h2>` +
+          `<p class="lede">${body} This lede has enough characters to avoid sparse expansion.</p>` +
+          '<div class="grid g3 mt-l">' +
+          '<div class="feature-card"><h4>Card A</h4><p class="dim">Body A with concrete detail.</p></div>' +
+          '<div class="feature-card"><h4>Card B</h4><p class="dim">Body B with concrete detail.</p></div>' +
+          '</div>' +
+          '<div class="slide-visual mt-l"><img src="" alt="Product UI" class="slide-image" width="960" height="540"></div>' +
+          '<div class="deck-footer"><span>Acme</span><span class="slide-number">1 / 3</span></div>',
+        title,
+      );
+
+    const html = deckShell(
+      [
+        nestedSlide('Cover', 'Welcome to Acme Analytics for modern teams.'),
+        nestedSlide('Why Now', 'Teams need clarity from day one without busywork.'),
+        nestedSlide('Features', 'Built for real product workflows across the stack.'),
+      ].join('\n'),
+    );
+
+    const { html: out, slideCount } = enrichProductDeckHtml(html, {
+      finalize: true,
+      productName: 'Acme',
+    });
+
+    expect(slideCount).toBe(PRODUCT_DECK_SLIDE_COUNT);
+    expect((out.match(/<section\b[^>]*\bclass=["'][^"']*\bslide\b/gi) || []).length).toBe(12);
+    // Nested closing divs must not leave orphan slides outside .deck
+    const deckInner = out.match(/<div[^>]*\bclass=["'][^"']*\bdeck\b[^"']*["'][^>]*>([\s\S]*)<\/div>\s*<\/body>/i)?.[1] ?? '';
+    expect((deckInner.match(/<section\b[^>]*\bclass=["'][^"']*\bslide\b/gi) || []).length).toBe(12);
+    expect(out).toContain('Card A');
+    expect(out).toContain('Welcome to Acme Analytics');
+  });
+
+  it('does not duplicate body content when rebuilding without a .deck wrapper', () => {
+    const html =
+      '<!doctype html><html><body>' +
+      slide('<p class="kicker">Cover</p><h1 class="h1">Acme</h1><p class="lede">Enough copy for the cover slide lede.</p>', 'Cover') +
+      '</body></html>';
+    const { html: out, slideCount } = enrichProductDeckHtml(html, { finalize: true, productName: 'Acme' });
+    expect(slideCount).toBe(PRODUCT_DECK_SLIDE_COUNT);
+    expect((out.match(/<section\b[^>]*\bclass=["'][^"']*\bslide\b/gi) || []).length).toBe(12);
+    expect((out.match(/<div\b[^>]*\bclass=["'](?:[^"']*\s)?deck(?:\s[^"']*)?["']/gi) || []).length).toBe(1);
+  });
 });

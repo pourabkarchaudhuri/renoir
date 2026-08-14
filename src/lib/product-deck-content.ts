@@ -45,6 +45,7 @@ export function productDeckPromptLines(): string[] {
   return [
     '# Product Deck requirements',
     'Deliver exactly 12 slides inside a .deck wrapper (section.slide per slide).',
+    'Renoir injects slide layout CSS — use semantic classes (.kicker, .h2, .lede, .grid.g3, .feature-card) and theme tokens; do not reinvent slide positioning.',
     'Copy density: every slide needs a kicker, title, and lede of at least two full sentences.',
     'Bullets: 3 concrete points per slide (or 3 feature/price cards with title + 2-line body each).',
     'No placeholder copy — no "Lorem ipsum", "Coming soon", or empty list items.',
@@ -471,16 +472,61 @@ function parseSlideSections(html: string): { attrs: string; inner: string; full:
   return slides;
 }
 
+/** True when a class attribute string includes the exact token `deck` (not deck-footer). */
+function classListHasDeck(attrs: string): boolean {
+  const m = attrs.match(/\bclass\s*=\s*(["'])([^"']*)\1/i);
+  if (!m) return false;
+  return m[2].split(/\s+/).some((t) => t === 'deck');
+}
+
+/** Index of the matching </div> for a tag that ends at openEnd (depth-balanced). */
+function findMatchingDivClose(html: string, openEnd: number): number {
+  let depth = 1;
+  const re = /<\/?div\b[^>]*>/gi;
+  re.lastIndex = openEnd;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    if (/^<\//.test(m[0])) {
+      depth -= 1;
+      if (depth === 0) return m.index;
+      continue;
+    }
+    // Ignore self-closing <div ... />
+    if (/\/>$/.test(m[0])) continue;
+    depth += 1;
+  }
+  return -1;
+}
+
+function findDeckOpen(html: string): { index: number; length: number } | null {
+  const re = /<div\b([^>]*)>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    if (classListHasDeck(m[1] ?? '')) {
+      return { index: m.index, length: m[0].length };
+    }
+  }
+  return null;
+}
+
 function rebuildDeckHtml(html: string, slideSections: string[]): string {
   const joined = slideSections.join('\n\n');
-  if (/<div[^>]*\bclass=["'][^"']*\bdeck\b/i.test(html)) {
-    return html.replace(
-      /(<div[^>]*\bclass=["'][^"']*\bdeck\b[^"']*["'][^>]*>)([\s\S]*?)(<\/div>)/i,
-      `$1\n${joined}\n$3`,
-    );
+  const open = findDeckOpen(html);
+  if (open) {
+    const openEnd = open.index + open.length;
+    const closeStart = findMatchingDivClose(html, openEnd);
+    if (closeStart >= 0) {
+      return `${html.slice(0, openEnd)}\n${joined}\n${html.slice(closeStart)}`;
+    }
+    // Unclosed deck: replace from open tag through end of string
+    return `${html.slice(0, openEnd)}\n${joined}\n</div>`;
   }
-  if (/<body[^>]*>/i.test(html)) {
-    return html.replace(/<body([^>]*)>/i, `<body$1>\n<div class="deck">\n${joined}\n</div>`);
+  if (/<body\b/i.test(html)) {
+    // Replace body contents so enriched slides do not duplicate leftover markup
+    return html.replace(
+      /<body([^>]*)>[\s\S]*<\/body>/i,
+      `<body$1>\n<div class="deck">\n${joined}\n</div>\n</body>`,
+    );
   }
   return `<div class="deck">\n${joined}\n</div>`;
 }
@@ -511,8 +557,13 @@ export function enrichProductDeckHtml(
       return { html, slideCount: countDeckSlides(html), filledFields: 0 };
     }
     slideSections = blueprints.map((bp, i) => buildSlideSection(bp, i, product));
-    const out = updateSlideTotals(rebuildDeckHtml(html, slideSections), PRODUCT_DECK_SLIDE_COUNT);
-    return { html: out, slideCount: PRODUCT_DECK_SLIDE_COUNT, filledFields: slideSections.length };
+    const out = rebuildDeckHtml(html, slideSections);
+    const slideCount = countDeckSlides(out) || PRODUCT_DECK_SLIDE_COUNT;
+    return {
+      html: updateSlideTotals(out, slideCount),
+      slideCount,
+      filledFields: slideSections.length,
+    };
   }
 
   if (finalize && parsed.length > PRODUCT_DECK_SLIDE_COUNT) {
@@ -534,7 +585,7 @@ export function enrichProductDeckHtml(
   }
 
   let out = rebuildDeckHtml(html, slideSections);
-  const slideCount = finalize ? PRODUCT_DECK_SLIDE_COUNT : slideSections.length;
+  const slideCount = countDeckSlides(out) || slideSections.length;
   out = updateSlideTotals(out, slideCount);
   return { html: out, slideCount, filledFields };
 }

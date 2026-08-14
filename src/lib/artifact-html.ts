@@ -1,6 +1,7 @@
 import { ensureViewportMeta } from '@/lib/preview-surfaces';
 import { buildThemeCss, injectThemeStyle, type ThemeStyleOptions } from '@/lib/theme-tokens';
 import { injectDashboardShell } from '@shared/dashboard-layout';
+import { injectProductDeckShell } from '@shared/product-deck-layout';
 import { ensureMarketingSiteScreens, isMarketingSiteArtifact } from '@shared/marketing-site-layout';
 import { enrichProductDeckHtml } from '@/lib/product-deck-content';
 import { fixArtifactLintFindings } from '@/lib/artifact-lint-fix';
@@ -32,6 +33,91 @@ export function stripPreviewChrome(html: string): string {
   return html
     .replace(/<a\b[^>]*\bclass=["'][^"']*\bskip\b[^"']*["'][^>]*>[\s\S]*?<\/a>/gi, '')
     .replace(/<a\b[^>]*href=["']#(?:main|content|main-content)["'][^>]*>[\s\S]*?<\/a>/gi, '');
+}
+
+/** Skills where artifact buttons/CTAs are part of the interactive preview surface. */
+const INTERACTIVE_BUTTON_SKILLS = new Set([
+  'saas-landing',
+  'web-prototype',
+  'dashboard',
+  'admin-console',
+  'docs-portal',
+  'pricing-page',
+  'mobile-app',
+  'mobile-onboarding',
+  'mobile-settings',
+  'event-page',
+  'portfolio',
+  'comparison',
+  'waitlist',
+  'login-page',
+  'checkout',
+  'feature-page',
+  'faq-page',
+  '404',
+]);
+
+/** Document/deck skills where artifact buttons are decorative in preview. */
+const SUPPRESS_BUTTON_SKILLS = new Set([
+  'blog-post',
+  'changelog',
+  'product-deck',
+  'pitch-deck',
+  'all-hands-deck',
+  'one-pager',
+  'newsletter',
+  'resume',
+  'invoice',
+  'receipt',
+  'pm-spec',
+  'rfc',
+  'system-diagram',
+  'case-study',
+  'job-listing',
+  'email-template',
+  'social-card',
+  'press-kit',
+  'menu-card',
+  'wedding-invite',
+]);
+
+const BUTTON_LIKE_CLASS_RE = /\b(btn|button|cta|nav-cta|pill-btn|cta-btn)\b/i;
+
+export function shouldKeepArtifactButtons(skillId?: string): boolean {
+  if (!skillId) return true;
+  if (INTERACTIVE_BUTTON_SKILLS.has(skillId)) return true;
+  if (SUPPRESS_BUTTON_SKILLS.has(skillId)) return false;
+  return true;
+}
+
+function isButtonLikeAnchor(el: Element): boolean {
+  if (el.tagName !== 'A') return false;
+  if (el.getAttribute('role') === 'button') return true;
+  const cls = el.getAttribute('class') ?? '';
+  return BUTTON_LIKE_CLASS_RE.test(cls);
+}
+
+function removePreviewButtons(doc: Document): void {
+  doc.querySelectorAll('button').forEach((el) => el.remove());
+  doc.querySelectorAll('input[type="button"], input[type="submit"], input[type="reset"]').forEach((el) => el.remove());
+  doc.querySelectorAll('a').forEach((el) => {
+    if (isButtonLikeAnchor(el)) el.remove();
+  });
+}
+
+/**
+ * Preview-only cleanup: strip decorative buttons/CTAs from non-interactive skills.
+ * Does not mutate stored artifact HTML or export output.
+ */
+export function stripNonInteractiveButtonsForPreview(html: string, skillId?: string): string {
+  if (shouldKeepArtifactButtons(skillId)) return html;
+  if (typeof DOMParser === 'undefined') return html;
+
+  const hadDoctype = /<!doctype/i.test(html);
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  removePreviewButtons(doc);
+  const serialized = doc.documentElement.outerHTML;
+  return hadDoctype ? `<!doctype html>\n${serialized}` : serialized;
 }
 
 /**
@@ -90,6 +176,7 @@ export function normalizeArtifactDocument(
       productName: opts.productName ?? title,
       finalize: opts.productDeckFinalize ?? true,
     }).html;
+    out = injectProductDeckShell(out);
   }
 
   if (isMarketingSiteArtifact(out) || (/\bdata-screen-id\s*=\s*["']landing["']/i.test(out) && /\bdata-goto\s*=/i.test(out))) {

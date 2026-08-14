@@ -1,16 +1,17 @@
-// Minimal Office Open XML PPTX builder. Renders each <section> / [data-slide]
-// of an artifact as a 1280×720 PNG via an offscreen Electron window, then
+// Minimal Office Open XML PPTX builder. Renders each slide as a 2560×1440 PNG
+// (2× capture of the 1280×720 deck viewport) via an offscreen Electron window,
 // assembles a slide-per-image .pptx through our zero-dep zipio.
 //
 // The skeleton below is the bare minimum that PowerPoint, Keynote and
 // Google Slides accept — slide master + single layout + theme + presentation
 // + per-slide XML. All XML is authored fresh.
 
-import { BrowserWindow } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import { writeZipToFile, ZipEntry } from './zipio.js';
 import { ensureProjectDir } from './workspace.js';
+import { capturePresentSlides, EXPORT_CAPTURE_SCALE } from './export/artifact-capture.js';
+import { wrapForExportCapture } from '../shared/preview-nav-bridge.js';
 
 export interface PptxRequest {
   projectId: string;
@@ -21,8 +22,6 @@ export interface PptxResult { ok: boolean; savedPath?: string; error?: string; }
 
 const SLIDE_W_EMU = 12_192_000;  // 16:9 widescreen
 const SLIDE_H_EMU =  6_858_000;
-const PX_W = 1280;
-const PX_H = 720;
 
 function xmlEscape(s: string): string {
   return s
@@ -33,58 +32,52 @@ function xmlEscape(s: string): string {
     .replace(/'/g, '&apos;');
 }
 
-async function captureSlides(html: string): Promise<Buffer[]> {
-  const win = new BrowserWindow({
-    show: false,
-    width: PX_W,
-    height: PX_H,
-    webPreferences: {
-      offscreen: true,
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
+async function captureSlides(html: string, slideCount?: number): Promise<Buffer[]> {
+  const wrapped = html.includes('id="__renoir_mode_style"') || html.includes('renoir:nav-state')
+    ? html
+    : wrapForExportCapture(html);
+  return capturePresentSlides({
+    html: wrapped,
+    slideCount,
+    scaleFactor: EXPORT_CAPTURE_SCALE,
   });
-  const out: Buffer[] = [];
-  try {
-    await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-    await new Promise((r) => setTimeout(r, 350));
-
-    // Force every <section> to be a 1280×720 panel and remove between-slide bleed.
-    await win.webContents.executeJavaScript(`
-      (function () {
-        const css = document.createElement('style');
-        css.textContent =
-          'html,body{margin:0;padding:0;width:${PX_W}px;}' +
-          'section,[data-slide]{width:${PX_W}px;height:${PX_H}px;display:flex;flex-direction:column;justify-content:center;box-sizing:border-box;overflow:hidden;}' +
-          ':not(section):not([data-slide])>section{margin:0!important;}';
-        document.head.appendChild(css);
-        return Array.from(document.querySelectorAll('section,[data-slide]')).length;
-      })();
-    `);
-
-    const count = await win.webContents.executeJavaScript('document.querySelectorAll("section,[data-slide]").length');
-    const total = Math.max(1, Number(count) || 1);
-
-    for (let i = 0; i < total; i++) {
-      await win.webContents.executeJavaScript(`
-        (function () {
-          const list = document.querySelectorAll('section,[data-slide]');
-          if (!list.length) { window.scrollTo(0, 0); return; }
-          list[${i}].scrollIntoView({ block: 'start' });
-        })();
-      `);
-      await new Promise((r) => setTimeout(r, 220));
-      const img = await win.webContents.capturePage({ x: 0, y: 0, width: PX_W, height: PX_H });
-      out.push(img.toPNG());
-    }
-  } finally {
-    try { win.destroy(); } catch { /* swallow */ }
-  }
-  return out;
 }
 
-/* ─── XML payloads ─────────────────────────────────────────────────────── */
+/** Build a .pptx file buffer from rasterized slide PNGs. */
+export function buildPptxZipBuffer(images: Buffer[]): Uint8Array {
+  if (!images.length) throw new Error('no slides to render');
+  return packZipEntries(buildPptxZipEntries(images));
+}
+
+function packZipEntries(entries: ZipEntry[]): Uint8Array {
+  const dir = path.join(ensureProjectDir('_pptx_tmp'), `pack-${Date.now()}.pptx`);
+  try {
+    writeZipToFile(dir, entries);
+    return new Uint8Array(fs.readFileSync(dir));
+  } finally {
+    try { fs.unlinkSync(dir); } catch { /* swallow */ }
+  }
+}
+
+export function buildPptxZipEntries(images: Buffer[]): ZipEntry[] {
+  const entries: ZipEntry[] = [];
+  const text = (s: string) => Buffer.from(s, 'utf8');
+  entries.push({ name: '[Content_Types].xml',                            data: text(contentTypesXml(images.length)) });
+  entries.push({ name: '_rels/.rels',                                    data: text(ROOT_RELS) });
+  entries.push({ name: 'ppt/presentation.xml',                           data: text(presentationXml(images.length)) });
+  entries.push({ name: 'ppt/_rels/presentation.xml.rels',                data: text(presentationRelsXml(images.length)) });
+  entries.push({ name: 'ppt/theme/theme1.xml',                           data: text(THEME_XML) });
+  entries.push({ name: 'ppt/slideMasters/slideMaster1.xml',              data: text(SLIDE_MASTER_XML) });
+  entries.push({ name: 'ppt/slideMasters/_rels/slideMaster1.xml.rels',   data: text(SLIDE_MASTER_RELS) });
+  entries.push({ name: 'ppt/slideLayouts/slideLayout1.xml',              data: text(SLIDE_LAYOUT_XML) });
+  entries.push({ name: 'ppt/slideLayouts/_rels/slideLayout1.xml.rels',   data: text(SLIDE_LAYOUT_RELS) });
+  for (let i = 0; i < images.length; i++) {
+    entries.push({ name: `ppt/slides/slide${i + 1}.xml`,                 data: text(slideXml(i)) });
+    entries.push({ name: `ppt/slides/_rels/slide${i + 1}.xml.rels`,      data: text(slideRelsXml(i)) });
+    entries.push({ name: `ppt/media/image${i + 1}.png`,                  data: images[i] });
+  }
+  return entries;
+}
 
 function contentTypesXml(slideCount: number): string {
   const overrides: string[] = [];
@@ -276,27 +269,13 @@ export async function exportArtifactToPptx(req: PptxRequest): Promise<PptxResult
   }
   if (!images.length) return { ok: false, error: 'no slides to render' };
 
-  const entries: ZipEntry[] = [];
-  const text = (s: string) => Buffer.from(s, 'utf8');
-  entries.push({ name: '[Content_Types].xml',                            data: text(contentTypesXml(images.length)) });
-  entries.push({ name: '_rels/.rels',                                    data: text(ROOT_RELS) });
-  entries.push({ name: 'ppt/presentation.xml',                           data: text(presentationXml(images.length)) });
-  entries.push({ name: 'ppt/_rels/presentation.xml.rels',                data: text(presentationRelsXml(images.length)) });
-  entries.push({ name: 'ppt/theme/theme1.xml',                           data: text(THEME_XML) });
-  entries.push({ name: 'ppt/slideMasters/slideMaster1.xml',              data: text(SLIDE_MASTER_XML) });
-  entries.push({ name: 'ppt/slideMasters/_rels/slideMaster1.xml.rels',   data: text(SLIDE_MASTER_RELS) });
-  entries.push({ name: 'ppt/slideLayouts/slideLayout1.xml',              data: text(SLIDE_LAYOUT_XML) });
-  entries.push({ name: 'ppt/slideLayouts/_rels/slideLayout1.xml.rels',   data: text(SLIDE_LAYOUT_RELS) });
-  for (let i = 0; i < images.length; i++) {
-    entries.push({ name: `ppt/slides/slide${i + 1}.xml`,                 data: text(slideXml(i)) });
-    entries.push({ name: `ppt/slides/_rels/slide${i + 1}.xml.rels`,      data: text(slideRelsXml(i)) });
-    entries.push({ name: `ppt/media/image${i + 1}.png`,                  data: images[i] });
-  }
-
   const dir = ensureProjectDir(req.projectId);
   const filename = (req.filename || `artifact-${Date.now()}.pptx`).replace(/[^a-z0-9._-]/gi, '_');
   const savedPath = path.join(dir, filename);
-  try { writeZipToFile(savedPath, entries); }
-  catch (err: any) { return { ok: false, error: err?.message || String(err) }; }
+  try {
+    writeZipToFile(savedPath, buildPptxZipEntries(images));
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
   return { ok: true, savedPath };
 }

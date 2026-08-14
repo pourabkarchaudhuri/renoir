@@ -89,7 +89,7 @@ export function LeftRail() {
     );
   }, [projects, skillId, project?.id, project?.skillId]);
 
-  const activeStudy = project && skillId && project.skillId === skillId ? project : undefined;
+  const activeStudy = project && skillId ? project : undefined;
   const collapsed = useUI((s) => s.railCollapsed);
   const toggleRail = useUI((s) => s.toggleRail);
 
@@ -723,9 +723,12 @@ function RailRename({ project, skillId }: { project?: ProjectRecord; skillId?: s
       autoFocus
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={save}
+      onBlur={() => { void save(); }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter') save();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
         if (e.key === 'Escape') { setEditing(false); setDraft(label); }
       }}
       className="w-full bg-transparent outline-none border-b border-primary/40 font-display italic text-2xl pb-1"

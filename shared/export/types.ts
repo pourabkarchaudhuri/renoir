@@ -1,6 +1,10 @@
 /** Format-agnostic document model for skill exports. */
 
-export type ExportFormat = 'pdf' | 'docx' | 'markdown';
+export type ExportFormat = 'pdf' | 'docx' | 'markdown' | 'pptx' | 'png';
+
+export type CaptureMode = 'present' | 'fullpage' | 'viewport';
+
+export type CaptureSurface = 'phone' | 'tablet' | 'desktop' | 'ultrawide';
 
 export interface ExportInput {
   label: string;
@@ -25,6 +29,17 @@ export interface ExportDocument {
    * matches the in-app layout; structured formats (DOCX/Markdown) use blocks.
    */
   previewHtml?: string;
+  /** Bridge-wrapped HTML for offscreen present-mode slide capture. */
+  captureHtml?: string;
+  /** Number of slides/screens for present-mode raster export. */
+  slideCount?: number;
+  /** When true, PDF/PNG/PPTX use offscreen raster capture instead of printToPDF. */
+  rasterExport?: boolean;
+  /** Offscreen capture strategy. */
+  captureMode?: CaptureMode;
+  captureWidth?: number;
+  captureHeight?: number;
+  surface?: CaptureSurface;
 }
 
 export type ExportInline =
@@ -53,10 +68,14 @@ export const EXPORT_FORMAT_EXTENSIONS: Record<ExportFormat, string> = {
   pdf: 'pdf',
   docx: 'docx',
   markdown: 'md',
+  pptx: 'pptx',
+  png: 'png',
 };
 
 export const EXPORT_FORMAT_LABELS: Record<ExportFormat, string> = {
   pdf: 'PDF',
   docx: 'Word Document',
   markdown: 'Markdown',
+  pptx: 'PowerPoint',
+  png: 'PNG Image',
 };

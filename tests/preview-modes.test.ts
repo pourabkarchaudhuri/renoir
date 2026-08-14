@@ -273,7 +273,7 @@ describe('NAV_BRIDGE present mode CSS', () => {
     expect(NAV_BRIDGE).toContain('renoir-footer-fixed');
     expect(NAV_BRIDGE).toContain('--renoir-chrome-top');
     expect(NAV_BRIDGE).toContain('--renoir-chrome-bottom');
-    expect(NAV_BRIDGE).toContain('function measureChrome()');
+    expect(NAV_BRIDGE).toContain('function measureChrome(');
   });
 
   it('stacks grids and scales slides to fit on phone/tablet', () => {

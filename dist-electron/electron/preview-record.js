@@ -5,6 +5,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { existsSync } from 'node:fs';
 import { projectDir as getProjectDir } from './workspace.js';
+import { capturePresentSlides } from './export/slide-capture.js';
+import { loadHtmlIntoWindow } from './load-html.js';
 const SURFACES = {
     phone: { w: 390, h: 844 },
     tablet: { w: 820, h: 1180 },
@@ -66,60 +68,54 @@ export async function recordPreview(req) {
     const outDir = path.join(projDir, 'recordings', stem);
     const framesDir = path.join(outDir, 'frames');
     fs.mkdirSync(framesDir, { recursive: true });
-    const win = new BrowserWindow({
-        show: false,
-        width: w,
-        height: h,
-        webPreferences: {
-            offscreen: true,
-            sandbox: true,
-            contextIsolation: true,
-            nodeIntegration: false,
-        },
-    });
     const captures = [];
-    try {
-        await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(req.html));
-        await new Promise((r) => setTimeout(r, 400));
-        if (recordMode === 'present') {
-            await win.webContents.executeJavaScript(`window.postMessage({ type: 'renoir:set-mode', mode: 'present' }, '*');`);
-            await new Promise((r) => setTimeout(r, 200));
-            const count = Math.max(1, req.slideCount ?? await win.webContents.executeJavaScript(`
-        (function () {
-          var slides = document.querySelectorAll('[data-slide], section.slide, .deck > section');
-          return Math.max(1, slides.length || 1);
-        })();
-      `));
-            for (let i = 0; i < count; i++) {
-                await win.webContents.executeJavaScript(`window.postMessage({ type: 'renoir:nav', idx: ${i} }, '*');`);
-                await new Promise((r) => setTimeout(r, 350));
-                const img = await win.webContents.capturePage({ x: 0, y: 0, width: w, height: h });
-                captures.push(img.toPNG());
-            }
-        }
-        else if (recordMode === 'scroll') {
-            const scrollMax = await win.webContents.executeJavaScript(`
+    if (recordMode === 'present') {
+        captures.push(...await capturePresentSlides({
+            html: req.html,
+            width: w,
+            height: h,
+            slideCount: req.slideCount,
+        }));
+    }
+    else {
+        const win = new BrowserWindow({
+            show: false,
+            width: w,
+            height: h,
+            webPreferences: {
+                offscreen: true,
+                sandbox: true,
+                contextIsolation: true,
+                nodeIntegration: false,
+            },
+        });
+        try {
+            await loadHtmlIntoWindow(win, req.html);
+            await new Promise((r) => setTimeout(r, 400));
+            if (recordMode === 'scroll') {
+                const scrollMax = await win.webContents.executeJavaScript(`
         Math.max(0, (document.documentElement.scrollHeight || document.body.scrollHeight || 0) - ${h});
       `);
-            const total = Math.max(2, Math.round(durationSec * fps));
-            for (let i = 0; i < total; i++) {
-                const y = scrollMax > 0 ? Math.round((i / Math.max(1, total - 1)) * scrollMax) : 0;
-                await win.webContents.executeJavaScript(`window.scrollTo(0, ${y});`);
-                await new Promise((r) => setTimeout(r, 1000 / fps));
+                const total = Math.max(2, Math.round(durationSec * fps));
+                for (let i = 0; i < total; i++) {
+                    const y = scrollMax > 0 ? Math.round((i / Math.max(1, total - 1)) * scrollMax) : 0;
+                    await win.webContents.executeJavaScript(`window.scrollTo(0, ${y});`);
+                    await new Promise((r) => setTimeout(r, 1000 / fps));
+                    const img = await win.webContents.capturePage({ x: 0, y: 0, width: w, height: h });
+                    captures.push(img.toPNG());
+                }
+            }
+            else {
                 const img = await win.webContents.capturePage({ x: 0, y: 0, width: w, height: h });
                 captures.push(img.toPNG());
             }
         }
-        else {
-            const img = await win.webContents.capturePage({ x: 0, y: 0, width: w, height: h });
-            captures.push(img.toPNG());
+        finally {
+            try {
+                win.destroy();
+            }
+            catch { /* swallow */ }
         }
-    }
-    finally {
-        try {
-            win.destroy();
-        }
-        catch { /* swallow */ }
     }
     if (captures.length === 1 && recordMode === 'static') {
         const pngPath = path.join(outDir, 'preview.png');
