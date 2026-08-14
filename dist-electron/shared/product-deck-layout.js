@@ -104,7 +104,33 @@ h4,.h4{font-size:clamp(18px,1.8vw,22px);line-height:1.3;font-weight:600;margin:0
 }
 .slide-visual>img,img.slide-image{width:100%;height:100%;max-width:100%;object-fit:cover;
   object-position:center;display:block;border:0;border-radius:var(--radius)}
-.deck>section.slide.dark{background:#0a0a12;color:#f5f5f7}
+.deck>section.slide:not(.dark){
+  background:var(--surface,#fff);
+  color:var(--text-1);
+  --fg:var(--text-1);
+  --muted:var(--text-2);
+  --text-1:#111216;
+  --text-2:#55596a;
+  --text-3:#8a8f9e;
+  --surface:#fff;
+  --surface-2:#f2f2f4;
+  --border:rgba(0,0,0,.08);
+}
+.deck>section.slide:not(.dark) .h1,.deck>section.slide:not(.dark) .h2,.deck>section.slide:not(.dark) .h3,
+.deck>section.slide:not(.dark) .h4,.deck>section.slide:not(.dark) .kicker,.deck>section.slide:not(.dark) .lede,
+.deck>section.slide:not(.dark) p,.deck>section.slide:not(.dark) li,.deck>section.slide:not(.dark) h1,
+.deck>section.slide:not(.dark) h2,.deck>section.slide:not(.dark) h3,.deck>section.slide:not(.dark) h4{
+  color:inherit;
+}
+.deck>section.slide:not(.dark) .gradient-text{
+  background:none;
+  -webkit-background-clip:unset;
+  background-clip:unset;
+  -webkit-text-fill-color:currentColor;
+  color:var(--accent);
+}
+.deck>section.slide.dark{background:#0a0a12;color:#f5f5f7;
+  --fg:#f5f5f7;--text-1:#f5f5f7;--text-2:rgba(245,245,247,.72);--text-3:rgba(245,245,247,.5)}
 .deck>section.slide.dark .h1,.deck>section.slide.dark .h2,.deck>section.slide.dark h3,
 .deck>section.slide.dark h4{color:#fff}
 .deck>section.slide.dark .lede,.deck>section.slide.dark .dim{color:rgba(245,245,247,.72)}

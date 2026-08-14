@@ -282,6 +282,49 @@ function temperatureUnsupported(status: number, bodyText: string): boolean {
     && /not supported|unsupported/i.test(bodyText);
 }
 
+/**
+ * Reasoning models bill hidden reasoning tokens against the completion cap, so a
+ * budget tuned for plain chat models can be spent before any artifact text is
+ * emitted. Guarantee enough headroom for reasoning plus a full artifact.
+ */
+const REASONING_TOKEN_FLOOR = 12288;
+
+function isReasoningModel(model: string): boolean {
+  return !modelSupportsTemperature(model);
+}
+
+/** Chat-completions rejects `max_tokens` on reasoning models. */
+export function tokenCapParams(
+  kind: RouteKind,
+  model: string,
+  cap: number,
+): Record<string, number> {
+  const reasoning = isReasoningModel(model);
+  const value = reasoning ? Math.max(cap, REASONING_TOKEN_FLOOR) : cap;
+  if (kind === 'azure-responses') return { max_output_tokens: value };
+  if (kind === 'anthropic') return { max_tokens: value };
+  return reasoning ? { max_completion_tokens: value } : { max_tokens: value };
+}
+
+function tokenCapUnsupported(status: number, bodyText: string): boolean {
+  return status === 400
+    && /max_tokens|max_completion_tokens/i.test(bodyText)
+    && /not supported|unsupported/i.test(bodyText);
+}
+
+/** Swap between `max_tokens` and `max_completion_tokens` after a rejection. */
+function swapTokenCapParam(body: Record<string, unknown>): Record<string, unknown> | null {
+  if ('max_tokens' in body) {
+    const { max_tokens: value, ...rest } = body;
+    return { ...rest, max_completion_tokens: value };
+  }
+  if ('max_completion_tokens' in body) {
+    const { max_completion_tokens: value, ...rest } = body;
+    return { ...rest, max_tokens: value };
+  }
+  return null;
+}
+
 async function runOnce(args: RunOnceArgs): Promise<boolean> {
   const { conversationId, route, messages, temperature, maxTokens, ctrl, call } = args;
   const tokenCap = maxTokens ?? 16384;
@@ -302,7 +345,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     const rest = processedMessages.filter((m) => m.role !== 'system');
     bodyJson = withTemperature({
       model: route.model,
-      max_tokens: tokenCap,
+      ...tokenCapParams(route.kind, route.model, tokenCap),
       stream: true,
       ...(sys ? { system: sys } : {}),
       messages: rest.map((m) => {
@@ -334,7 +377,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     bodyJson = withTemperature({
       model: route.model,
       stream: true,
-      max_output_tokens: tokenCap,
+      ...tokenCapParams(route.kind, route.model, tokenCap),
       ...(sys ? { instructions: sys } : {}),
       input: rest.map((m) => {
         const imgs = m.images;
@@ -361,7 +404,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     headers.Authorization   = `Bearer ${route.apiKey}`;
     bodyJson = withTemperature({
       model: route.model,
-      max_tokens: tokenCap,
+      ...tokenCapParams(route.kind, route.model, tokenCap),
       messages: processedMessages.map((m) => {
         const imgs = m.images;
         if (imgs.length > 0) {
@@ -387,7 +430,7 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
     headers.Authorization = `Bearer ${route.apiKey}`;
     bodyJson = withTemperature({
       model: route.model,
-      max_tokens: tokenCap,
+      ...tokenCapParams(route.kind, route.model, tokenCap),
       messages: processedMessages.map((m) => {
         const imgs = m.images;
         if (imgs.length > 0) {
@@ -426,6 +469,19 @@ async function runOnce(args: RunOnceArgs): Promise<boolean> {
         body: JSON.stringify(bodyJson),
         signal: ctrl.signal,
       });
+    }
+
+    if (!res.ok && tokenCapUnsupported(res.status, await res.clone().text().catch(() => ''))) {
+      const swapped = swapTokenCapParam(bodyJson);
+      if (swapped) {
+        bodyJson = swapped;
+        res = await fetch(route.url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(bodyJson),
+          signal: ctrl.signal,
+        });
+      }
     }
 
     if (!res.ok || !res.body) {

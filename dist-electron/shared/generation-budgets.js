@@ -2,7 +2,8 @@
 export const SKILL_GENERATION_BUDGETS = {
     'saas-landing': { maxTokens: 4096, maxAutoContinue: 2 },
     'pricing-page': { maxTokens: 3072, maxAutoContinue: 2 },
-    'changelog': { maxTokens: 3072, maxAutoContinue: 2 },
+    // 6-8 versioned entries plus inline CSS overruns a 3k cap and streams a truncated page.
+    'changelog': { maxTokens: 6144, maxAutoContinue: 3 },
     'blog-post': { maxTokens: 6144, maxAutoContinue: 2 },
 };
 export const DEFAULT_MAX_TOKENS = 16384;

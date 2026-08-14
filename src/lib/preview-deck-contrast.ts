@@ -71,6 +71,13 @@ export const DECK_CONTRAST_BRIDGE_FN = `
       'body[data-renoir-mode="present"] .renoir-slide.dark[data-renoir-active="1"] .muted{' +
         'opacity:1!important;' +
       '}' +
+      'body[data-renoir-mode="present"] .slide.is-active .anim-fade-up,' +
+      'body[data-renoir-mode="present"] .slide.is-active .anim-rise-in,' +
+      'body[data-renoir-mode="present"] .renoir-slide[data-renoir-active="1"] .anim-fade-up,' +
+      'body[data-renoir-mode="present"] .renoir-slide[data-renoir-active="1"] .anim-rise-in{' +
+        'opacity:1!important;visibility:visible!important;transform:none!important;filter:none!important;' +
+        'animation:none!important;' +
+      '}' +
       'body[data-renoir-mode="present"] .renoir-slide[data-renoir-active="1"] a,' +
       'body[data-renoir-mode="present"] .renoir-slide[data-renoir-active="1"] .cta-btn{' +
         'text-shadow:none;' +
@@ -127,6 +134,11 @@ export const DECK_CONTRAST_BRIDGE_FN = `
       slide.style.setProperty('--renoir-fg', '#111827');
       slide.style.setProperty('--renoir-muted', '#374151');
       slide.style.setProperty('--renoir-heading', '#0f172a');
+      slide.style.setProperty('--fg', '#111827');
+      slide.style.setProperty('--text-1', '#111827');
+      slide.style.setProperty('--text-2', '#374151');
+      slide.style.setProperty('--text-3', '#6b7280');
+      slide.style.setProperty('color', '#111827');
     }
   }
 `;
